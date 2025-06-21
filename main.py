@@ -1,30 +1,36 @@
 #!/usr/bin/env python3
-# main.py – rev-w40  (2025-06-27)
+# main.py – rev-w41  (2025-06-27)
 """
-Playlist-Player – gap-less playlist player with Foobar .fplite support,
-per-playlist resume history, cover-art, timeline seek, Create / Scan /
-Rename / Delete, and custom window / exe icon.
+Playlist-Player
+───────────────
+Gap-less music-player for Windows (PySide6 + libVLC).
 
-• This revision removes stray U+200B (zero-width-space) characters
-  that produced a SyntaxError on Python 3.13.
-• No functional changes; only those two lines are fixed.
+Key features
+• Scan / create / rename / delete playlists (.m3u, .m3u8, .fplite + index.txt)
+• Gap-less playback with DirectSound / WASAPI selector
+• Per-playlist resume history (debounced writes every 5 s + flush on exit)
+• Friendly *display name* now saved in each playlist’s *.history.json*
+  → survives loss of *app.state*
+• Embedded cover-art, timeline seek (click / drag / wheel ±5 s, Ctrl ±1 s)
+• Custom icon ― Playlist-Player_logo.ico
 """
 
 from __future__ import annotations
-import sys, os, subprocess, venv, site, hashlib, io
+import sys, os, subprocess, venv, site, hashlib, io, tempfile
 from pathlib import Path
 from typing  import Dict, List, Optional, Tuple, Set
 
-# ═══════════════════════════════════════════════════════
-# 0. bootstrap local venv (PySide6 | python-vlc | mutagen | pillow)
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
+# 0.  local venv bootstrap  (PySide6 · python-vlc · mutagen · Pillow)
+# ═══════════════════════════════════════════════════════════════════════
 APP_DIR  = Path(__file__).parent
 VENV_DIR = APP_DIR / ".venv"
-PYSIDE_REQ = "PySide6>=6.9.0" if sys.version_info >= (3, 13) else "PySide6>=6.7,<6.8"
+PYSIDE_REQ = "PySide6>=6.9.0" if sys.version_info >= (3, 13) \
+             else "PySide6>=6.7,<6.8"
 REQS = [PYSIDE_REQ, "python-vlc", "mutagen", "pillow"]
 
 def _ensure_env() -> None:
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False):           # PyInstaller bundle
         return
     if not VENV_DIR.exists():
         venv.create(VENV_DIR, with_pip=True)
@@ -35,7 +41,10 @@ def _ensure_env() -> None:
     sp = (VENV_DIR / "Lib/site-packages") if os.name == "nt" else \
          next((VENV_DIR / "lib").glob("python*/site-packages"))
     site.addsitedir(sp)
-    os.environ["PATH"] = f"{VENV_DIR/('Scripts' if os.name=='nt' else 'bin')}{os.pathsep}{os.environ.get('PATH','')}"
+    os.environ["PATH"] = (
+        f"{VENV_DIR/('Scripts' if os.name=='nt' else 'bin')}"
+        f"{os.pathsep}{os.environ.get('PATH','')}"
+    )
 _ensure_env()
 
 # ═════════════════ Qt / extern imports ═════════════════
@@ -57,7 +66,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 import scanner, storage, player, history
 
 # ═════════════════ constants & helpers ═════════════════
-ICON_PATH = APP_DIR / "Playlist-Player_logo.ico"
+ICON_PATH  = APP_DIR / "Playlist-Player_logo.ico"
 
 AUDIO_OPTIONS = ["System default", "DirectSound",
                  "WASAPI shared",  "WASAPI exclusive"]
@@ -66,10 +75,11 @@ AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
 ART_DIR = Path.home()/".playlist-relinker-cache"/"art"
 ART_DIR.mkdir(parents=True, exist_ok=True)
 
-TICKS       = 10         # 100 ms per slider tick
-MAX_SECONDS = 86_400     # 24 h clamp
+TICKS       = 10         # slider: 100 ms per tick
+MAX_SECONDS = 86_400     # clamp length @ 24 h
 
 def strip_dpr(px: QPixmap) -> QPixmap:
+    """Return DPR-1 pixmap so logical px == physical px."""
     dpr = px.devicePixelRatioF()
     if dpr == 1.0:
         return px
@@ -79,45 +89,52 @@ def strip_dpr(px: QPixmap) -> QPixmap:
     return cp
 
 class TimelineSlider(QSlider):
-    jumpRequested = Signal(float)
+    """Clickable / draggable / wheel-seek slider."""
+    jumpRequested = Signal(float)      # seconds
+
     def __init__(self,*a,**k):
         super().__init__(*a,**k); self.setOrientation(Qt.Horizontal)
+
     def _val(self,x:int)->int:
         r=max(0,min(x/self.width(),1))
         return int(self.minimum()+r*(self.maximum()-self.minimum()))
+
     def mousePressEvent(self,e):
         if e.button()==Qt.LeftButton:
             self.setSliderDown(True)
             v=self._val(int(e.position().x() if hasattr(e,"position") else e.pos().x()))
             self.setValue(v); self.jumpRequested.emit(v/TICKS); e.accept()
         super().mousePressEvent(e)
+
     def mouseMoveEvent(self,e):
         if self.isSliderDown():
             v=self._val(int(e.position().x() if hasattr(e,"position") else e.pos().x()))
             self.setValue(v); self.jumpRequested.emit(v/TICKS); e.accept()
         super().mouseMoveEvent(e)
+
     def mouseReleaseEvent(self,e):
         if self.isSliderDown(): self.setSliderDown(False); e.accept()
         super().mouseReleaseEvent(e)
+
     def wheelEvent(self,e):
-        step=1 if e.modifiers() & Qt.ControlModifier else 5
-        delta=step*(e.angleDelta().y()//120)
+        step  = 1 if e.modifiers() & Qt.ControlModifier else 5
+        delta = step*(e.angleDelta().y()//120)
         self.setValue(max(self.minimum(),
                           min(self.maximum(), self.value()+delta*TICKS)))
         self.jumpRequested.emit(self.value()/TICKS); e.accept()
 
 # ═════════════════ CreatePlaylistDialog ═════════════════
 class CreatePlaylistDialog(QDialog):
+    """Pick audio files, reorder, save as .m3u8."""
     def __init__(self,parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create Playlist"); self.resize(500,400)
 
-        self.list=QListWidget(); self.list.setSelectionMode(QListWidget.ExtendedSelection)
-        btn_add,btn_rm,btn_up,btn_down=(QPushButton(t) for t in ("Add files","Remove","Up","Down"))
-        ctl=QHBoxLayout(); [ctl.addWidget(b) for b in(btn_add,btn_rm,btn_up,btn_down)]; ctl.addStretch()
-        buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
-
-        lay=QVBoxLayout(self); lay.addWidget(self.list,1); lay.addLayout(ctl); lay.addWidget(buttons)
+        self.list = QListWidget(); self.list.setSelectionMode(QListWidget.ExtendedSelection)
+        btn_add,btn_rm,btn_up,btn_down = (QPushButton(t) for t in ("Add files","Remove","Up","Down"))
+        ctl = QHBoxLayout(); [ctl.addWidget(b) for b in (btn_add,btn_rm,btn_up,btn_down)]; ctl.addStretch()
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay = QVBoxLayout(self); lay.addWidget(self.list,1); lay.addLayout(ctl); lay.addWidget(buttons)
 
         btn_add.clicked.connect(self._add_files); btn_rm.clicked.connect(self._remove_sel)
         btn_up.clicked.connect(lambda:self._move_sel(-1)); btn_down.clicked.connect(lambda:self._move_sel(1))
@@ -135,10 +152,10 @@ class CreatePlaylistDialog(QDialog):
     def _move_sel(self,delta:int):
         rows=sorted({self.list.row(it) for it in self.list.selectedItems()})
         if not rows: return
-        new=[r+delta for r in rows]
-        if min(new)<0 or max(new)>=self.list.count(): return
+        dest=[r+delta for r in rows]
+        if min(dest)<0 or max(dest)>=self.list.count(): return
         items=[self.list.takeItem(r) for r in rows]
-        for r,it in sorted(zip(new,items)):
+        for r,it in sorted(zip(dest,items)):
             self.list.insertItem(r,it); self.list.setItemSelected(it,True)
 
     def tracks(self)->List[str]:
@@ -149,31 +166,29 @@ class MainWindow(QWidget):
     ART_PX=256
     def __init__(self):
         super().__init__()
-
         self.setWindowTitle("Playlist-Player")
-        if ICON_PATH.exists():
-            self.setWindowIcon(QIcon(str(ICON_PATH)))
-
-        self.resize(1100,650)
-        self.setAcceptDrops(True)
+        if ICON_PATH.exists(): self.setWindowIcon(QIcon(str(ICON_PATH)))
+        self.resize(1100,650); self.setAcceptDrops(True)
         self._init_style()
         self._build_widgets()
 
+        # runtime state
         self._playlists:List[scanner.Playlist]=[]
         self._cur_pl_idx:Optional[int]=None
         self._meta_cache:Dict[Path,Tuple[str,str,Optional[Path]]]={}
         self._icon_cache:Dict[Path,QPixmap]={}
 
-        self._load_state()                          # <- defined later
+        self._load_state()
         self._player=player.VLCGaplessPlayer(self._on_track_change)
         self._wire_signals()
-
         QTimer(self,interval=100,timeout=self._tick).start()
 
-    # ---------- UI construction
+    # ---------- UI build
     def _build_widgets(self):
+        # panes
         self.list_playlists=QListWidget(frameShape=QFrame.NoFrame)
         self.tracks_sel=QListWidget(frameShape=QFrame.NoFrame); self.tracks_sel.setSelectionMode(QListWidget.NoSelection)
+
         self.lbl_curtitle=QLabel("Now Playing",alignment=Qt.AlignCenter); self.lbl_curtitle.setStyleSheet("font-weight:bold;")
         self.tracks_cur=QListWidget(frameShape=QFrame.NoFrame); self.tracks_cur.setSelectionMode(QListWidget.NoSelection)
 
@@ -183,15 +198,15 @@ class MainWindow(QWidget):
         self.cmb_output=QComboBox(); self.cmb_output.addItems(AUDIO_OPTIONS)
         self.lbl_cover=QLabel(alignment=Qt.AlignCenter); self.lbl_cover.setFixedSize(self.ART_PX,self.ART_PX); self.lbl_cover.setStyleSheet("background:palette(Base);")
 
-        sb=QWidget(); sbv=QVBoxLayout(sb); sbv.setContentsMargins(0,0,0,0)
-        sbv.addWidget(self.lbl_curtitle); sbv.addWidget(self.tracks_cur,1)
-        sbv.addWidget(QLabel("Audio output")); sbv.addWidget(self.cmb_output)
-        sbv.addStretch(); sbv.addWidget(self.lbl_cover,0,Qt.AlignCenter)
+        sidebar=QWidget(); sv=QVBoxLayout(sidebar); sv.setContentsMargins(0,0,0,0)
+        sv.addWidget(self.lbl_curtitle); sv.addWidget(self.tracks_cur,1)
+        sv.addWidget(QLabel("Audio output")); sv.addWidget(self.cmb_output)
+        sv.addStretch(); sv.addWidget(self.lbl_cover,0,Qt.AlignCenter)
 
         split=QSplitter(Qt.Horizontal)
-        split.addWidget(self.list_playlists); split.addWidget(self.tracks_sel); split.addWidget(sb)
-        split.setSizes([240,460,300])
+        split.addWidget(self.list_playlists); split.addWidget(self.tracks_sel); split.addWidget(sidebar); split.setSizes([240,460,300])
 
+        # toolbar + playback
         self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete=(QPushButton(t) for t in ("Create","Scan","Rename","Delete"))
         self.btn_prev=QPushButton("Prev"); self.btn_next=QPushButton("Next")
         tb=QHBoxLayout(); [tb.addWidget(b) for b in(self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete)]; tb.addStretch(); tb.addWidget(self.btn_prev); tb.addWidget(self.btn_next)
@@ -203,7 +218,7 @@ class MainWindow(QWidget):
 
         root=QVBoxLayout(self); root.addLayout(tb); root.addWidget(split,1); root.addLayout(pb)
 
-    # ---------- connect signals
+    # ---------- signals
     def _wire_signals(self):
         self.slider.jumpRequested.connect(self._player.seek)
         self.cmb_output.currentIndexChanged.connect(lambda i:self._player.set_output(AUDIO_MODES[i]))
@@ -213,8 +228,7 @@ class MainWindow(QWidget):
         self.btn_delete.clicked.connect(self._delete_playlist)
         self.list_playlists.itemDoubleClicked.connect(self._play_selected)
         self.list_playlists.currentRowChanged.connect(lambda *_: self._refresh_sel())
-        self.btn_prev.clicked.connect(self._player.prev_track)
-        self.btn_next.clicked.connect(self._player.next_track)
+        self.btn_prev.clicked.connect(self._player.prev_track); self.btn_next.clicked.connect(self._player.next_track)
         self.btn_play.clicked.connect(self._toggle_play)
 
     # ---------- style
@@ -229,13 +243,12 @@ class MainWindow(QWidget):
             f"QPushButton:hover {{background:{hover};}}"
         )
 
-    # ---------- drag & drop
+    # ═════════════════ drag & drop  ═════════════════
     def dragEnterEvent(self,e:QDragEnterEvent):
         if any(Path(u.toLocalFile()).is_dir() or Path(u.toLocalFile()).suffix.lower() in scanner.PLAYLIST_EXTS
-               for u in e.mimeData().urls()):
-            e.acceptProposedAction()
-        else:
-            e.ignore()
+               for u in e.mimeData().urls()): e.acceptProposedAction()
+        else: e.ignore()
+
     def dropEvent(self,e:QDropEvent):
         changed=False
         for url in e.mimeData().urls():
@@ -247,7 +260,7 @@ class MainWindow(QWidget):
                 if pl: changed|=self._add_playlists([pl])
         if changed: self._save_state()
 
-    # ---------- metadata & cover-art
+    # ═════════════════ metadata & art ════════════════
     def _probe(self,data:bytes,mime:str,prio:int):
         area=0
         try:
@@ -266,8 +279,7 @@ class MainWindow(QWidget):
         for stem in ("cover","folder","front","AlbumArt","Artwork"):
             for ext in (".jpg",".jpeg",".png"):
                 f=path.parent/f"{stem}{ext}"
-                if f.exists():
-                    cand.append(self._probe(f.read_bytes(),"image/png" if ext.endswith("png") else "image/jpeg",0))
+                if f.exists(): cand.append(self._probe(f.read_bytes(),"image/png" if ext.endswith("png") else "image/jpeg",0))
         if not cand: return None
         cand.sort(key=lambda t:(t[0],t[1],t[2]),reverse=True)
         *_ ,data,mime=cand[0]
@@ -301,21 +313,22 @@ class MainWindow(QWidget):
         return (strip_dpr(QPixmap(str(art))).scaled(self.ART_PX,self.ART_PX,Qt.KeepAspectRatio,Qt.SmoothTransformation)
                 if art and art.exists() else None)
 
-    # ---------- persistence
+    # ═════════════════ persistence ═══════════════════
     def _load_state(self):
         for rec in storage.load():
             p=Path(rec["path"])
             if not p.exists(): continue
             pl=next((pl for pl in scanner.scan_playlists(p.parent,False) if pl.path==p),None)
             if pl:
-                pl.name=rec.get("name",p.stem)
-                self._playlists.append(pl)
-                self.list_playlists.addItem(pl.name)
+                hist_name=history.load(p).get("display_name",p.stem)
+                pl.name=rec.get("name",hist_name)
+                self._playlists.append(pl); self.list_playlists.addItem(pl.name)
 
     def _save_state(self):
         storage.save([{"path":str(pl.path),"name":pl.name} for pl in self._playlists])
+        for pl in self._playlists: history.ensure_name(pl.path,pl.name)   # keep in history.json
 
-    # ---------- playlist management
+    # ═════════════════ playlist management ═══════════
     def _add_playlists(self,new:List[scanner.Playlist])->bool:
         added=False
         for pl in new:
@@ -325,8 +338,7 @@ class MainWindow(QWidget):
 
     def _scan_folder(self):
         folder=QFileDialog.getExistingDirectory(self,"Choose folder")
-        if folder and self._add_playlists(scanner.scan_playlists(Path(folder))):
-            self._save_state()
+        if folder and self._add_playlists(scanner.scan_playlists(Path(folder))): self._save_state()
 
     def _sel_pl(self)->Optional[scanner.Playlist]:
         idx=self.list_playlists.currentRow()
@@ -337,7 +349,9 @@ class MainWindow(QWidget):
         if not pl: return
         new,ok=QInputDialog.getText(self,"Rename playlist","Display name:",text=pl.name)
         if ok and new.strip():
-            pl.name=new.strip(); self.list_playlists.currentItem().setText(pl.name); self._save_state()
+            pl.name=new.strip(); self.list_playlists.currentItem().setText(pl.name)
+            history.ensure_name(pl.path,pl.name)
+            self._save_state()
 
     def _delete_playlist(self):
         pl=self._sel_pl()
@@ -349,32 +363,23 @@ class MainWindow(QWidget):
 
     def _create_playlist(self):
         dlg=CreatePlaylistDialog(self)
-        if dlg.exec()!=QDialog.Accepted:
-            return
-        tracks = dlg.tracks()
-        if not tracks:
-            return
-        fname,_=QFileDialog.getSaveFileName(
-            self, "Save playlist", str(Path.home()/"playlist.m3u8"),
-            "M3U8 playlist (*.m3u8)"
-        )
-        if not fname:
-            return
+        if dlg.exec()!=QDialog.Accepted: return
+        tracks=dlg.tracks()
+        if not tracks: return
+        fname,_=QFileDialog.getSaveFileName(self,"Save playlist",str(Path.home()/"playlist.m3u8"),
+                                            "M3U8 playlist (*.m3u8)")
+        if not fname: return
         path=Path(fname)
-        try:
-            path.write_text("\n".join(tracks), encoding="utf-8")
+        try: path.write_text("\n".join(tracks),encoding="utf-8")
         except Exception as e:
-            QMessageBox.critical(self,"Error",f"Could not write playlist:\n{e}")
-            return
+            QMessageBox.critical(self,"Error",f"Could not write playlist:\n{e}"); return
         pl=scanner.Playlist(path=path,name=path.stem,tracks=[Path(t) for t in tracks])
-        if self._add_playlists([pl]):
-            self._save_state()
+        if self._add_playlists([pl]): history.ensure_name(pl.path,pl.name); self._save_state()
 
-    # ---------- list helpers
+    # ═════════════════ list helpers ═══════════════════
     def _make_item(self,p:Path,prefix:str=""):
         it=QListWidgetItem(prefix+self._display(p))
-        ico=self._icon48(p)
-        if ico: it.setIcon(ico)
+        if (ico:=self._icon48(p)): it.setIcon(ico)
         return it
 
     def _place_bar(self,bar:QFrame,lw:QListWidget,idx:int,frac:float):
@@ -384,15 +389,13 @@ class MainWindow(QWidget):
         x=int(max(0,min(rect.left()+frac*rect.width(),width-2)))
         bar.setGeometry(x,rect.top(),2,rect.height()); bar.show()
 
-    # ---------- refresh panes
+    # ═════════════════ refresh panes ══════════════════
     def _refresh_sel(self):
         self.tracks_sel.clear(); self._bar_sel.hide()
-        pl=self._sel_pl()
-        if not pl: return
+        pl=self._sel_pl();  ​if not pl: return
         hist=history.load(pl.path)
         finished=set(hist.get("finished",[]))
-        idx=hist.get("track_index",-1)
-        pos=float(hist.get("position",0)); length=float(hist.get("length",0))
+        idx=hist.get("track_index",-1); pos=float(hist.get("position",0)); length=float(hist.get("length",0))
         if (length<=0 or length is None) and 0<=idx<len(pl.tracks):
             try:length=MFile(pl.tracks[idx]).info.length or 0
             except Exception:length=0
@@ -401,11 +404,9 @@ class MainWindow(QWidget):
             it=self._make_item(Path(t))
             if str(t) in finished: it.setForeground(QColor("gray"))
             if not Path(t).exists(): it.setForeground(QColor("red"))
-            if i==idx:
-                f=it.font(); f.setBold(True); it.setFont(f)
+            if i==idx: f=it.font(); f.setBold(True); it.setFont(f)
             self.tracks_sel.addItem(it)
-        if pos>0 and 0<=idx<len(pl.tracks):
-            self._place_bar(self._bar_sel,self.tracks_sel,idx,frac)
+        if pos>0 and 0<=idx<len(pl.tracks): self._place_bar(self._bar_sel,self.tracks_sel,idx,frac)
 
     def _refresh_cur(self):
         self.tracks_cur.clear(); self._bar_play.hide()
@@ -413,18 +414,15 @@ class MainWindow(QWidget):
         fin=set(history.load(self._player._pl_path).get("finished",[]))
         for i,t in enumerate(self._player.playlist):
             it=self._make_item(Path(t),"▶ " if i==self._player.idx else "")
-            if i==self._player.idx:
-                f=it.font(); f.setBold(True); it.setFont(f)
+            if i==self._player.idx: f=it.font(); f.setBold(True); it.setFont(f)
             if str(t) in fin: it.setForeground(QColor("gray"))
             if not Path(t).exists(): it.setForeground(QColor("red"))
             self.tracks_cur.addItem(it)
         self._place_play_bar()
 
     def _place_play_bar(self):
-        if not self._player.player:
-            self._bar_play.hide(); return
-        length=max(1,self._player.length())
-        frac=self._player.position()/length
+        if not self._player.player: self._bar_play.hide(); return
+        length=max(1,self._player.length()); frac=self._player.position()/length
         self._place_bar(self._bar_play,self.tracks_cur,self._player.idx,frac)
 
     def _highlight_row(self):
@@ -433,7 +431,7 @@ class MainWindow(QWidget):
             it.setBackground(QColor(self._row_bg) if bold else Qt.transparent)
             f=it.font(); f.setBold(bold); it.setFont(f)
 
-    # ---------- playback controls
+    # ═════════════════ playback helpers ═══════════════
     def _play_selected(self):
         pl=self._sel_pl()
         if pl:
@@ -441,17 +439,14 @@ class MainWindow(QWidget):
             self.slider.setEnabled(True); self._player.play(); self._on_track_change()
 
     def _toggle_play(self):
-        if self._player.player and self._player.player.is_playing():
-            self._player.pause()
-        elif not self._player.player:
-            self._play_selected()
-        else:
-            self._player.play()
+        if self._player.player and self._player.player.is_playing(): self._player.pause()
+        elif not self._player.player: self._play_selected()
+        else: self._player.play()
 
     def _update_time_label(self,pos:float,length:float):
         self.lbl_time.setText(f"{int(pos)//60:02}:{int(pos)%60:02} / {int(length)//60:02}:{int(length)%60:02}")
 
-    # ---------- timer tick
+    # ═════════════════ timer tick ════════════════════
     def _tick(self):
         self._player.tick()
         if self._player.player:
@@ -464,7 +459,7 @@ class MainWindow(QWidget):
             if sel_pl and sel_pl.path==self._player._pl_path:
                 self._place_bar(self._bar_sel,self.tracks_sel,self._player.idx,pos/length)
 
-    # ---------- VLC callback
+    # ═════════════════ VLC callback ═══════════════════
     def _on_track_change(self,*_):
         self.slider.setEnabled(True)
         self._cur_pl_idx=next((i for i,pl in enumerate(self._playlists) if pl.path==self._player._pl_path),None)
@@ -472,11 +467,11 @@ class MainWindow(QWidget):
         self._highlight_row(); self._refresh_cur(); self._refresh_sel()
         self.lbl_cover.setPixmap(self._cover(self._player.playlist[self._player.idx]) or QPixmap())
 
-    # ---------- close
+    # ═════════════════ close ═════════════════════════
     def closeEvent(self,e):
         self._player.flush_history(); self._save_state(); super().closeEvent(e)
 
-# ═════════════ entry-point ═════════════
+# ═════════════════ entry-point ═══════════════════════
 if __name__=="__main__":
     app=QApplication(sys.argv)
     if ICON_PATH.exists(): app.setWindowIcon(QIcon(str(ICON_PATH)))
