@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-# storage.py – rev-s3  (2025-06-30)
+# storage.py – rev-s4  (2025-06-30)
 r"""
-Persistent app-state helper.
-
+Persistent app-state helper
+═══════════════════════════
 * Stores JSON in a per-user config directory  
-  – **Windows** :  ``%APPDATA%\\Playlist-Player\\appstate.json``  
+  – **Windows** :  ``%APPDATA%\Playlist-Player\appstate.json``  
   – **Unix**    :  ``~/.playlist-player/appstate.json``  
 * Atomic write (tmp + replace) to avoid corruption.
 
-Only the doc-string was changed (`r"""…"""`) so Python no longer warns
-about the ``\P`` escape.  All functions behave exactly as before.
+(Only the doc-string was changed to a raw string so that back-slashes
+inside the Windows path example don’t trigger SyntaxWarnings.)
 """
 
 from __future__ import annotations
