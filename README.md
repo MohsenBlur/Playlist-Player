@@ -51,9 +51,8 @@ You do **not** need to install these manually.
 
 ## Basic Usage
 
-1. Click **Scan** and choose a folder → playlists appear on the left.
-  or
-  Drag and drop playlists into window.
+1. Click **Scan** and choose a folder → playlists appear on the left (or Drag and drop playlists into window).
+  
 2. Double-click a playlist to start playback.
 3. **Prev/Next** (top-right) switch tracks.
 4. Drag / wheel the timeline to seek.
