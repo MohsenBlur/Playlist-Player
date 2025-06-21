@@ -1,34 +1,36 @@
 @echo off
 :: Playlist-Player — Windows standalone build
-:: Requires Python 3.x and PyInstaller (`py -m pip install pyinstaller`)
+:: Prerequisite:  PyInstaller  (py -m pip install pyinstaller)
 
-setlocal enableextensions
+setlocal EnableExtensions
 cd /d "%~dp0"
 
-rem -----------------------------------------------------------------
-rem Step 1: make sure PyInstaller is available
-rem -----------------------------------------------------------------
+rem ─────────────────────────────────────────────────────────────
+rem 1) ensure PyInstaller is installed / up-to-date
+rem ─────────────────────────────────────────────────────────────
 py -3 -m pip install --upgrade --quiet pyinstaller
 
-rem -----------------------------------------------------------------
-rem Step 2: build
-rem  * --onefile      → single EXE
-rem  * --noconsole    → GUI app (no black console window)
-rem  * --clean        → start from a fresh build dir
-rem  * --add-data     → include icon next to the exe             (src;dest)
-rem  * --hidden-import→ modules that PyInstaller misses (mutagen, Pillow)
-rem -----------------------------------------------------------------
+rem ─────────────────────────────────────────────────────────────
+rem 2) build
+rem     --onefile       single EXE
+rem     --noconsole     hide console window
+rem     --clean         wipe older build cache
+rem     --icon          embed Playlist-Player_logo.ico
+rem     --add-data      copy the icon next to the EXE at runtime
+rem     --hidden-import pull-in modules PyInstaller sometimes misses
+rem ─────────────────────────────────────────────────────────────
 py -3 -m PyInstaller ^
   --name "Playlist-Player" ^
   --onefile ^
   --noconsole ^
   --clean ^
+  --icon "Playlist-Player_logo.ico" ^
   --add-data "Playlist-Player_logo.ico;." ^
   --hidden-import mutagen ^
   --hidden-import PIL.Image ^
   main.py
 
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo(
     echo BUILD FAILED
     pause
@@ -36,6 +38,6 @@ if %errorlevel% neq 0 (
 )
 
 echo(
-echo Done!  The standalone EXE is in ^"dist\Playlist-Player.exe^"
+echo Done!  See dist\Playlist-Player.exe
 pause
 endlocal
