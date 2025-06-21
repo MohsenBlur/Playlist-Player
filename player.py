@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# player.py – rev-j  (2025-06-28)
+# player.py – rev-k  (2025-06-29)
 """
-Gap-less VLC wrapper with debounced history writes.
+Gap-less VLC wrapper for Playlist-Player.
 
-• Flush history every 5 s (rate-limited) and immediately on track change
-• Audio-output switcher:  default / DirectSound / WASAPI (shared & excl.)
-• NEW (rev-j)
-  – GUI callback dispatched via Tk `after(0, …)` to avoid cross-thread GUI calls
-  – Resume-seek uses VLC media option (no busy-wait), preventing freeze
+• Debounced history writes (5 s) via background thread
+• Output switcher: default / DirectSound / WASAPI (shared & exclusive)
+• NEW in rev-k
+  – End-of-track callback now dispatches `next_track()` through Tk
+    `after(0, …)` → no freeze when one track ends.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import vlc
 import tkinter as tk
 import history
 
-# ── helper to run code on Tk main loop ──────────────────────
+# ── helper to run GUI work on the Tk main loop ───────────────
 def _tk_dispatch(fn: Callable[[], None]):
     root = tk._default_root
     if root and root.winfo_exists():
@@ -27,7 +27,7 @@ def _tk_dispatch(fn: Callable[[], None]):
     else:
         fn()
 
-# ── command-line audio outputs for VLC ──────────────────────
+# ── VLC audio-output command lines ───────────────────────────
 AOUT_OPTS: dict[str, list[str]] = {
     "default"         : [],
     "directsound"     : ["--aout=directsound"],
@@ -36,7 +36,7 @@ AOUT_OPTS: dict[str, list[str]] = {
 }
 
 class VLCGaplessPlayer:
-    WRITE_INTERVAL = 5.0          # seconds between scheduled writes
+    WRITE_INTERVAL = 5.0   # seconds between auto-flushes
 
     def __init__(self, on_track_change: Callable[[], None]):
         self._aout_mode = "default"
@@ -49,15 +49,14 @@ class VLCGaplessPlayer:
         self._finished: Set[str]   = set()
         self.player: vlc.MediaPlayer | None = None
 
-        # history writer thread state
-        self._lock       = threading.Lock()
+        # history writer thread
+        self._lock        = threading.Lock()
         self._pending: Dict | None = None
-        self._last_write = 0.0
-        self._writer_th  = threading.Thread(
-            target=self._writer_loop, daemon=True)
-        self._writer_th.start()
+        self._last_write  = 0.0
+        threading.Thread(target=self._writer_loop,
+                         daemon=True).start()
 
-    # ── VLC instance / output mode ───────────────────────────
+    # ── output mode ──────────────────────────────────────────
     def _make_instance(self):
         self._instance = vlc.Instance(
             ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
@@ -66,43 +65,30 @@ class VLCGaplessPlayer:
     def set_output(self, mode: str):
         if mode == self._aout_mode or mode not in AOUT_OPTS:
             return
-        prev = self._aout_mode
-        self._aout_mode = mode
-
-        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
-        cur_idx, cur_pos   = self.idx, self.position()
-
+        cur_pl, cur_idx = self.playlist, self.idx
+        cur_pos         = self.position()
         self.stop()
+        self._aout_mode = mode
         self._make_instance()
 
         if cur_pl:
-            self.load_playlist(cur_pl, cur_tracks)
-            self.idx = min(cur_idx, max(0, len(self.playlist)-1))
+            self.load_playlist(self._pl_path, cur_pl)
+            self.idx = min(cur_idx, len(cur_pl) - 1)
             self.seek(cur_pos)
-        else:
-            self._aout_mode = prev  # fallback
 
     # ── playlist handling ───────────────────────────────────
     def load_playlist(self, pl_path: Path, tracks: List[Path]):
         self.flush_history()
-        self._pl_path = pl_path
-        self.playlist = tracks
-
-        hist     = history.load(pl_path)
-        self.idx = min(hist.get("track_index", 0), max(0, len(tracks)-1))
-        position = float(hist.get("position", 0))
+        self._pl_path  = pl_path
+        self.playlist  = tracks
+        hist           = history.load(pl_path)
+        self.idx       = min(hist.get("track_index", 0), len(tracks) - 1)
+        resume         = float(hist.get("position", 0))
         self._finished = set(hist.get("finished", []))
-
-        self._set_media(self.playlist[self.idx], resume=position)
+        self._set_media(self.playlist[self.idx], resume=resume)
         _tk_dispatch(self._cb)
 
-    # ── media helpers ───────────────────────────────────────
-    def _attach_end_event(self):
-        self.player.event_manager().event_attach(
-            vlc.EventType.MediaPlayerEndReached,
-            lambda *_: self.next_track()
-        )
-
+    # ── internal: create & start VLC media-player ───────────
     def _set_media(self, path: Path, *, resume: float = 0.0):
         if self.player:
             self.player.stop()
@@ -113,21 +99,21 @@ class VLCGaplessPlayer:
 
         self.player = self._instance.media_player_new()
         self.player.set_media(media)
-        self._attach_end_event()
         self.player.play()
-        self._mark_dirty(force=True)   # immediate write after switch
 
-    # ── basic controls ──────────────────────────────────────
-    def play(self):   self.player and self.player.play()
+        # attach *after* play(), else first track may fire instantly
+        self.player.event_manager().event_attach(
+            vlc.EventType.MediaPlayerEndReached,
+            lambda *_: _tk_dispatch(self.next_track)  # ← the fix
+        )
+
+        self._mark_dirty(force=True)  # immediate write on change
+
+    # ── public controls ─────────────────────────────────────
+    def play(self):  self.player and self.player.play()
     def pause(self):
-        if self.player:
-            self.player.pause()
-            self._mark_dirty(force=True)
-
-    def stop(self):
-        if self.player:
-            self.player.stop()
-            self.player = None
+        if self.player: self.player.pause(); self._mark_dirty(force=True)
+    def stop(self):  self.player and self.player.stop()
 
     def next_track(self):
         self._mark_finished()
@@ -137,6 +123,8 @@ class VLCGaplessPlayer:
             _tk_dispatch(self._cb)
 
     def prev_track(self):
+        if self.position() > 5:
+            self.seek(0); return
         if self.idx > 0:
             self.idx -= 1
             self._set_media(self.playlist[self.idx])
@@ -145,15 +133,17 @@ class VLCGaplessPlayer:
     # ── position helpers ────────────────────────────────────
     def length(self)   -> float: return (self.player.get_length() or 0)/1000 if self.player else 0.0
     def position(self) -> float: return (self.player.get_time()   or 0)/1000 if self.player else 0.0
-    def seek(self, seconds: float):
+    def seek(self, sec: float):
         if self.player:
-            self.player.set_time(int(seconds*1000)); self._mark_dirty(force=True)
+            self.player.set_time(int(sec * 1000))
+            self._mark_dirty(force=True)
 
+    # ── finished marker ─────────────────────────────────────
     def _mark_finished(self):
         if self._pl_path and self.playlist:
             self._finished.add(str(self.playlist[self.idx]))
 
-    # ── history writer (background thread) ──────────────────
+    # ── debounced history writer ────────────────────────────
     def _snapshot(self) -> Dict:
         return {
             "pl_path":     self._pl_path,
@@ -162,25 +152,19 @@ class VLCGaplessPlayer:
             "finished":    set(self._finished),
         }
 
-    def _mark_dirty(self, *, force: bool=False):
+    def _mark_dirty(self, *, force=False):
         with self._lock:
             self._pending = self._snapshot()
-            if force:
-                self._last_write = 0.0      # force immediate write
+            if force: self._last_write = 0.0
 
     def _writer_loop(self):
         while True:
             time.sleep(0.5)
             with self._lock:
-                if not self._pending:
-                    continue
-                now = time.monotonic()
-                if now - self._last_write >= self.WRITE_INTERVAL:
-                    snap          = self._pending
-                    self._pending = None
-                    self._last_write = now
-                else:
-                    snap = None
+                snap = None
+                if self._pending and time.monotonic() - self._last_write >= self.WRITE_INTERVAL:
+                    snap, self._pending = self._pending, None
+                    self._last_write = time.monotonic()
             if snap:
                 history.save(snap["pl_path"],
                              snap["track_index"],
@@ -200,4 +184,4 @@ class VLCGaplessPlayer:
     # ── GUI tick (call every 100 ms) ────────────────────────
     def tick(self):
         if self.player and self._pl_path:
-            self._mark_dirty()  # schedule debounce write
+            self._mark_dirty()  # schedule debounced write
