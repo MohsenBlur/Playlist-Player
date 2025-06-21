@@ -1,5 +1,5 @@
 @echo off
-rem build_windows.bat – build Playlist-Player on Windows
+rem build_windows.bat – package Playlist-Player with custom icon
 
 setlocal
 set PY=python
@@ -10,14 +10,15 @@ if not exist ".venv\Scripts\python.exe" (
   .venv\Scripts\python.exe -m pip install --upgrade pip
 )
 
-echo [BUILD] Installing deps into venv...
+echo [BUILD] Installing build deps into venv...
 .venv\Scripts\python.exe -m pip install --quiet ^
-    pyinstaller==6.* PySide6 pillow mutagen python-vlc
+      pyinstaller==6.* PySide6 pillow mutagen python-vlc
 
 echo [BUILD] Running PyInstaller...
 .venv\Scripts\pyinstaller.exe ^
-  --name PlaylistPlayer ^
   --onefile --windowed ^
+  --name PlaylistPlayer ^
+  --icon Playlist-Player_logo.ico ^            rem ← NEW
   --hidden-import PySide6 ^
   --hidden-import PySide6.QtCore ^
   --hidden-import PySide6.QtGui ^
@@ -30,7 +31,7 @@ echo [BUILD] Running PyInstaller...
   main.py || goto :err
 
 echo.
-echo Build complete → dist\PlaylistPlayer.exe
+echo  Build complete → dist\PlaylistPlayer.exe
 goto :eof
 
 :err
