@@ -74,6 +74,20 @@ playlist-player/
 
 ---
 
+## Windows Packaging
+
+Run the provided **`build_windows.bat`** script to create a standalone
+executable using PyInstaller:
+
+```cmd
+build_windows.bat
+```
+
+The resulting **`dist/PlaylistPlayer.exe`** can be distributed without
+requiring Python on the target system.
+
+---
+
 ## License
 
 MIT – free to use, modify, and distribute.
