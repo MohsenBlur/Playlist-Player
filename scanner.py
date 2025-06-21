@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
-# scanner.py – rev-s6  (2025-06-26)
+# scanner.py – rev-s7  (2025-06-28)
 """
 Playlist discovery & parsing.
 
 • Supports .m3u / .m3u8 / .fplite
-• Reads Foobar2000 **index.txt** in each folder that has .fplite files.
-  ── Handles both forms:
-       004F122F-646A-… : My Mix
-       playlist-004F122F-646A-… : My Mix
+• Reads Foobar2000 **index.txt** for friendly names.
+• NEW in s7 – Drops a lone leading “/” that remains after stripping
+  file:// URIs (e.g. `/s:/Music/…` → `S:\Music\…`) so Windows can open
+  the file and VLC plays FLAC tracks correctly.
 """
 
 from __future__ import annotations
-import re
+import re, urllib.parse
 from pathlib import Path
 from typing  import List, Dict, Iterable
 
 PLAYLIST_EXTS = {".m3u", ".m3u8", ".fplite"}
 
-# ──────────────────────────────────────────────────────────
-#  Data class
-# ──────────────────────────────────────────────────────────
+# ────────────────────────── data class ────────────────────────────
 class Playlist:
     def __init__(self, *, path: Path, name: str, tracks: List[Path]):
         self.path   = path
@@ -28,13 +26,10 @@ class Playlist:
     def __repr__(self):
         return f"<Playlist {self.name!r} ({len(self.tracks)} tracks)>"
 
-# ──────────────────────────────────────────────────────────
-#  Foobar index.txt  (GUID → title)   – with caching
-# ──────────────────────────────────────────────────────────
+# ───────────── Foobar2000 index.txt  (GUID → title) ───────────────-
 _index_cache: Dict[Path, Dict[str, str]] = {}
 
 def _norm_guid(s: str) -> str:
-    """Normalize GUID key: strip ‘playlist-’ prefix, upper-case."""
     s = s.strip()
     if s.lower().startswith("playlist-"):
         s = s[9:]
@@ -49,12 +44,12 @@ def _load_index(folder: Path) -> Dict[str, str]:
     if idx.is_file():
         try:
             text = idx.read_text(encoding="utf-8-sig", errors="replace")
-            for line in text.splitlines():
-                if ":" not in line:
+            for ln in text.splitlines():
+                if ":" not in ln and "\t" not in ln:
                     continue
-                guid, title = line.split(":", 1)
-                key_full  = _norm_guid(guid)               # stripped/upper
-                key_raw   = guid.strip().upper()           # original
+                guid, _, title = re.split(r"[:\t]", ln, maxsplit=1)
+                key_full = _norm_guid(guid)
+                key_raw  = guid.strip().upper()
                 for k in (key_full, key_raw):
                     mapping[k] = title.strip()
         except Exception:
@@ -62,44 +57,49 @@ def _load_index(folder: Path) -> Dict[str, str]:
     _index_cache[folder] = mapping
     return mapping
 
-# ──────────────────────────────────────────────────────────
-#  Parsing helpers
-# ──────────────────────────────────────────────────────────
-URI_PREFIXES = ("file://", "file:\\\\", "file:\\")
+# ───────────────────────── parsing helpers ─────────────────────────
+URI_PREFIXES = ("file:///", "file://", "file:\\\\", "file:\\")  # longest first
 WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:[/\\]")
 
-def _strip_prefix(line: str) -> str:
+def _strip_uri_prefix(line: str) -> str:
+    lower = line.lower()
     for pre in URI_PREFIXES:
-        if line.lower().startswith(pre):
+        if lower.startswith(pre):
             return line[len(pre):]
     return line
 
+def _percent_decode(s: str) -> str:
+    try:
+        return urllib.parse.unquote(s)
+    except Exception:
+        # fallback: manual
+        return re.sub(r"%([0-9A-Fa-f]{2})",
+                      lambda m: bytes.fromhex(m.group(1)).decode("latin-1"),
+                      s)
+
 def _normalise(line: str) -> Path | None:
-    line = line.strip().lstrip("\ufeff")
+    line = line.strip().lstrip("\ufeff")          # strip BOM / spaces
     if not line or line.startswith("#"):
         return None
-    line = _strip_prefix(line)
 
-    # percent-decode
-    try:
-        line = re.sub(r"%([0-9A-Fa-f]{2})",
-                      lambda m: bytes.fromhex(m.group(1)).decode("utf-8"),
-                      line)
-    except Exception:
-        pass
+    line = _strip_uri_prefix(line)
+    line = _percent_decode(line)
+
+    # NEW s7: drop a single leading "/" when what follows is drive:\
+    if WIN_DRIVE_RE.match(line.lstrip("/")):      # ← added
+        line = line.lstrip("/")
+
     if WIN_DRIVE_RE.match(line):
         line = line.replace("/", "\\")
+
     return Path(line)
 
-# ──────────────────────────────────────────────────────────
-#  Readers
-# ──────────────────────────────────────────────────────────
+# ───────────────────────── readers ────────────────────────────────
 def _read_m3u(path: Path) -> List[Path]:
-    tracks = []
+    tracks: List[Path] = []
     for ln in path.read_text(encoding="utf-8", errors="replace").splitlines():
         p = _normalise(ln)
-        if p:
-            tracks.append(p)
+        if p: tracks.append(p)
     return tracks
 
 def _read_fplite(path: Path) -> List[Path]:
@@ -107,13 +107,12 @@ def _read_fplite(path: Path) -> List[Path]:
     try:
         text = data.decode("utf-8-sig", errors="replace")
     except UnicodeDecodeError:
-        text = data.decode("utf-16",    errors="replace")
-    text = text.replace("\x00", "\n")   # some files are NUL-separated
-    tracks = []
+        text = data.decode("utf-16", errors="replace")
+    text = text.replace("\x00", "\n")     # some .fplite are NUL-separated
+    tracks: List[Path] = []
     for ln in text.splitlines():
         p = _normalise(ln)
-        if p:
-            tracks.append(p)
+        if p: tracks.append(p)
     return tracks
 
 def _read_playlist(path: Path) -> List[Path]:
@@ -124,16 +123,15 @@ def _read_playlist(path: Path) -> List[Path]:
         return _read_fplite(path)
     return []
 
-# ──────────────────────────────────────────────────────────
-#  Public API
-# ──────────────────────────────────────────────────────────
+# ───────────────────────── public API ─────────────────────────────
 def scan_playlists(root: Path, recursive: bool = True) -> List[Playlist]:
     """Return Playlist objects for all supported playlist files under *root*."""
-    walker: Iterable[Path] = (
-        (p for p in root.rglob("*") if p.suffix.lower() in PLAYLIST_EXTS)
-        if recursive else
-        (p for p in root.iterdir() if p.suffix.lower() in PLAYLIST_EXTS)
-    )
+    if root.is_file() and root.suffix.lower() in PLAYLIST_EXTS:
+        walker: Iterable[Path] = [root]
+    elif recursive:
+        walker = (p for p in root.rglob("*") if p.suffix.lower() in PLAYLIST_EXTS)
+    else:
+        walker = (p for p in root.iterdir() if p.suffix.lower() in PLAYLIST_EXTS)
 
     playlists: List[Playlist] = []
     for p in walker:
@@ -147,8 +145,7 @@ def scan_playlists(root: Path, recursive: bool = True) -> List[Playlist]:
         name = p.stem
         if p.suffix.lower() == ".fplite":
             idx_map = _load_index(p.parent)
-            guid_key = _norm_guid(p.stem)
-            name = idx_map.get(guid_key, name)
+            name = idx_map.get(_norm_guid(p.stem), name)
 
         playlists.append(Playlist(path=p, name=name, tracks=tracks))
     return playlists
