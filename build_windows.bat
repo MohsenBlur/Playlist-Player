@@ -1,39 +1,41 @@
 @echo off
-rem build_windows.bat – package Playlist-Player with custom icon
+:: Playlist-Player — Windows standalone build
+:: Requires Python 3.x and PyInstaller (`py -m pip install pyinstaller`)
 
-setlocal
-set PY=python
+setlocal enableextensions
+cd /d "%~dp0"
 
-if not exist ".venv\Scripts\python.exe" (
-  echo [BUILD] Creating local venv...
-  %PY% -m venv .venv || goto :err
-  .venv\Scripts\python.exe -m pip install --upgrade pip
+rem -----------------------------------------------------------------
+rem Step 1: make sure PyInstaller is available
+rem -----------------------------------------------------------------
+py -3 -m pip install --upgrade --quiet pyinstaller
+
+rem -----------------------------------------------------------------
+rem Step 2: build
+rem  * --onefile      → single EXE
+rem  * --noconsole    → GUI app (no black console window)
+rem  * --clean        → start from a fresh build dir
+rem  * --add-data     → include icon next to the exe             (src;dest)
+rem  * --hidden-import→ modules that PyInstaller misses (mutagen, Pillow)
+rem -----------------------------------------------------------------
+py -3 -m PyInstaller ^
+  --name "Playlist-Player" ^
+  --onefile ^
+  --noconsole ^
+  --clean ^
+  --add-data "Playlist-Player_logo.ico;." ^
+  --hidden-import mutagen ^
+  --hidden-import PIL.Image ^
+  main.py
+
+if %errorlevel% neq 0 (
+    echo(
+    echo BUILD FAILED
+    pause
+    exit /b %errorlevel%
 )
 
-echo [BUILD] Installing build deps into venv...
-.venv\Scripts\python.exe -m pip install --quiet ^
-      pyinstaller==6.* PySide6 pillow mutagen python-vlc
-
-echo [BUILD] Running PyInstaller...
-.venv\Scripts\pyinstaller.exe ^
-  --onefile --windowed ^
-  --name PlaylistPlayer ^
-  --icon Playlist-Player_logo.ico ^            rem ← NEW
-  --hidden-import PySide6 ^
-  --hidden-import PySide6.QtCore ^
-  --hidden-import PySide6.QtGui ^
-  --hidden-import PySide6.QtWidgets ^
-  --hidden-import PySide6.QtNetwork ^
-  --hidden-import mutagen.id3 ^
-  --hidden-import vlc ^
-  --collect-all PySide6 ^
-  --collect-all PIL ^
-  main.py || goto :err
-
-echo.
-echo  Build complete → dist\PlaylistPlayer.exe
-goto :eof
-
-:err
-echo BUILD FAILED
-exit /b 1
+echo(
+echo Done!  The standalone EXE is in ^"dist\Playlist-Player.exe^"
+pause
+endlocal
