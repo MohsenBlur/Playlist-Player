@@ -20,9 +20,9 @@ A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playli
 git clone https://github.com/your-name/playlist-player.git
 cd playlist-player
 python main.py          # first run sets up a local .venv
-
+````
 or
-
+````
 Download as ZIP, make sure python and VLC are installed and double-click main.py
 ````
 
@@ -52,6 +52,8 @@ You do **not** need to install these manually.
 ## Basic Usage
 
 1. Click **Scan** and choose a folder → playlists appear on the left.
+  or
+  Drag and drop playlists into window.
 2. Double-click a playlist to start playback.
 3. **Prev/Next** (top-right) switch tracks.
 4. Drag / wheel the timeline to seek.
