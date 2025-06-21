@@ -32,6 +32,8 @@ class VLCGaplessPlayer:
         self._instance      = vlc.Instance(["--no-video", "--quiet"])
         self._cb            = on_track_change
 
+        self._next_pending  = False
+
         self.playlist: List[Path] = []
         self.idx       = 0
         self._pl_path: Path | None = None
@@ -85,7 +87,7 @@ class VLCGaplessPlayer:
     def _attach_end_event(self):
         self.player.event_manager().event_attach(
             vlc.EventType.MediaPlayerEndReached,
-            lambda *_: self.next_track()
+            lambda *_: setattr(self, "_next_pending", True)
         )
 
     def _set_media(self, path: Path, *, resume: float = 0.0):
@@ -178,5 +180,8 @@ class VLCGaplessPlayer:
 
     # ─────────────────────────────── GUI tick (every 0.1 s)
     def tick(self):
+        if self._next_pending:
+            self._next_pending = False
+            self.next_track()
         if self.player and self._pl_path:
             self._mark_dirty()   # update _pending (may flush later)
