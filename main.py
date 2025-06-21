@@ -27,6 +27,10 @@ PYSIDE_REQ = "PySide6>=6.9.0" if sys.version_info >= (3, 13) else "PySide6>=6.7,
 REQS = [PYSIDE_REQ, "python-vlc", "mutagen", "pillow"]
 
 def _ensure_env() -> None:
+    """Create a local venv and install dependencies unless running frozen."""
+    if getattr(sys, "frozen", False):
+        # When bundled by PyInstaller the libs are already packaged
+        return
     if not VENV_DIR.exists():
         venv.create(VENV_DIR, with_pip=True)
         subprocess.check_call([
