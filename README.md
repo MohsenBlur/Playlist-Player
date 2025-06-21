@@ -1,4 +1,81 @@
 # Playlist-Player
-Play playlists that remember their playback history and progress. Perfect for Radio, Podcast, Audiobooks, etc.
 
-Required VLC to be installed.
+A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playlists and plays them gap-lessly through VLC.
+
+---
+
+## Features
+* **Folder scan** – add all playlists beneath a chosen directory  
+* **Gap-less playback** – powered by libVLC  
+* **Per-playlist history** – resumes where you left off  
+* **Embedded cover-art** – JPEG / PNG extracted automatically  
+* **Timeline seek** – click, drag or mouse-wheel (± 5 s, *Ctrl* ± 1 s)  
+* **Light / Dark mode** – follows your OS theme
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/your-name/playlist-player.git
+cd playlist-player
+python main.py          # first run sets up a local .venv
+
+or
+
+Download as ZIP, make sure python and VLC are installed and double-click main.py
+````
+
+### First-run bootstrap
+
+On first launch the script creates **`.venv/`** beside itself and installs:
+
+* `PySide6` – Qt GUI bindings
+* `python-vlc` – VLC Python wrapper
+* `mutagen` – tag & cover-art reader
+* `Pillow` – image helpers
+
+You do **not** need to install these manually.
+
+---
+
+## Dependencies
+
+| Requirement          | Notes                                                                             |
+| -------------------- | --------------------------------------------------------------------------------- |
+| **Python ≥ 3.8**     | 3.9 – 3.12 tested                                                                 |
+| **VLC media player** | Desktop build (64-bit) – [download](https://www.videolan.org/vlc/)                |
+| libVLC path          | Found automatically on Windows; set env var **`VLC_PATH`** if VLC lives elsewhere |
+
+---
+
+## Basic Usage
+
+1. Click **Scan** and choose a folder → playlists appear on the left.
+2. Double-click a playlist to start playback.
+3. **Prev/Next** (top-right) switch tracks.
+4. Drag / wheel the timeline to seek.
+5. Close the app – play positions & custom names are saved automatically.
+
+---
+
+## File Tree
+
+```
+playlist-player/
+├─ main.py          # GUI + bootstrap
+├─ player.py        # gap-less VLC wrapper
+├─ scanner.py       # playlist discovery
+├─ history.py       # per-playlist progress
+├─ storage.py       # saved playlist list
+└─ .venv/           # local virtual-env (auto)
+```
+
+---
+
+## License
+
+MIT – free to use, modify, and distribute.
+
+```
+```
