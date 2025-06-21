@@ -1,57 +1,59 @@
 #!/usr/bin/env python3
-# history.py – rev-d1  (2025-06-25)
+# history.py  –  rev-h4  (2025-06-27)
 """
-Per-playlist playback history, stored as JSON next to the playlist.
+Read / write per-playlist history files.
 
-Changes
-───────
-• `save()` now writes atomically:
-    playlist.fplite.history.json.tmp  →  os.replace() →  .history.json
-  so a crash/power-loss can’t corrupt the file.
+Schema  (JSON)
+--------------
+{
+  "display_name": "My Road-Trip Mix",   # optional – NEW
+  "track_index" : 3,
+  "position"    : 17.5,                 # seconds
+  "finished"    : ["/path/track1.flac", …]
+}
+All writes are atomic (tmp + replace) and tolerant to partial data.
 """
 
 from __future__ import annotations
-import json, os, tempfile
+import json, tempfile, os
 from pathlib import Path
-from typing import Dict, Set
+from typing  import Set, Dict, Any
 
-_HISTORY_SUFFIX = ".history.json"
+def _path(pl: Path) -> Path:
+    return pl.with_suffix(pl.suffix + ".history.json")
 
+def load(pl: Path) -> Dict[str, Any]:
+    p = _path(pl)
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
-def _hist_path(pl_path: Path) -> Path:
-    return pl_path.with_suffix(pl_path.suffix + _HISTORY_SUFFIX)
+def _atomic_write(path: Path, data: dict):
+    tmp = Path(tempfile.gettempdir()) / (path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    tmp.replace(path)
 
-
-def load(pl_path: Path) -> Dict:
-    path = _hist_path(pl_path)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
-    # defaults
-    return {"track_index": 0, "position": 0.0, "finished": []}
-
-
-def save(pl_path: Path,
+def save(pl: Path,
          track_index: int,
          position: float,
-         finished: Set[str]) -> None:
-    """Atomically write history JSON (tmp file + rename)."""
-    data = {
-        "track_index": track_index,
-        "position": position,
-        "finished": sorted(finished),
-    }
-    path = _hist_path(pl_path)
-    tmp_fd, tmp_name = tempfile.mkstemp(suffix=".tmp",
-                                        dir=str(path.parent))
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-            fh.flush(); os.fsync(fh.fileno())
-        os.replace(tmp_name, path)          # atomic on NTFS / POSIX
-    finally:
-        # if something went wrong and tmp still exists
-        try: os.unlink(tmp_name)
-        except FileNotFoundError: pass
+         finished: Set[str]):
+    data           = load(pl)
+    data["track_index"] = track_index
+    data["position"]    = position
+    data["finished"]    = sorted(finished)
+    _atomic_write(_path(pl), data)
+
+# –––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+# NEW: persist friendly name so it survives app.state loss
+# –––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+def ensure_name(pl: Path, name: str):
+    if not name:
+        return
+    p   = _path(pl)
+    dat = load(pl)
+    if dat.get("display_name") == name:
+        return
+    dat["display_name"] = name
+    _atomic_write(p, dat)
