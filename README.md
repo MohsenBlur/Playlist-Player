@@ -17,6 +17,18 @@ A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playli
 
 ## Quick Start
 
+## 1 - [DOWNLOAD Playlist-Player.exe](https://github.com/MohsenBlur/Playlist-Player/releases/tag/v0.25.06.21)
+## 2 - [Install VLC](https://www.videolan.org/vlc/)
+## 3 - Create a folder for Playlist-Player.exe
+## 4 - Run Playlist-Player.exe
+### 5 - Either just drag-and-drop playlists into the window, or use SCAN (it scans for playlists in a folder and all folders within it) or CREATE your own playlists
+
+
+---
+
+## To run the script instead of binary:
+
+
 ```bash
 git clone https://github.com/your-name/playlist-player.git
 cd playlist-player
