@@ -1,60 +1,54 @@
 #!/usr/bin/env python3
-# player.py – rev-e4  (2025-06-25)
+# player.py – rev-e5  (2025-06-26)
 """
-Gap-less VLC wrapper   –   now with **debounced, threaded history writes**
+Gap-less VLC wrapper with debounced, atomic history writes.
 
-Key points
-──────────
-• GUI thread updates an in-memory snapshot every 100 ms.
-• A background writer thread flushes to disk only when the snapshot has
-  been unchanged for ≥ 1 s  ➜  huge drop in disk writes.
-• Uses the atomic `history.save()` (rev-d1) for crash-safe writes.
+* Writes progress to RAM every _tick()_ (100 ms)
+* Background thread flushes to JSON once the data is unchanged ≥1 s
+* flush_history() forces a synchronous write on app exit
 """
 
 from __future__ import annotations
 import time, threading
 from pathlib import Path
-from typing import List, Set, Callable, Dict
+from typing  import List, Set, Callable, Dict
 
 import vlc
 import history
 
-# ── audio backend CLI options ───────────────────────────────────────────
+# ── audio output CLI options ───────────────────────────────────────────
 AOUT_OPTS: dict[str, list[str]] = {
-    "default":         [],
-    "directsound":     ["--aout=directsound"],
-    "wasapi_shared":   ["--aout=wasapi"],
-    "wasapi_exclusive":["--aout=wasapi", "--wasapi-exclusivemode"],
+    "default"         : [],
+    "directsound"     : ["--aout=directsound"],
+    "wasapi_shared"   : ["--aout=wasapi"],
+    "wasapi_exclusive": ["--aout=wasapi", "--wasapi-exclusivemode"],
 }
 
-# ── main class ──────────────────────────────────────────────────────────
 class VLCGaplessPlayer:
-    DEBOUNCE_SEC = 1.0      # flush if no updates for this long
+    DEBOUNCE_SEC = 1.0
 
     def __init__(self, on_track_change: Callable[[], None]):
-        # audio
-        self._aout_mode: str = "default"
+        self._aout_mode = "default"
         self._instance: vlc.Instance | None = None
         self._make_instance()
 
-        # playlist state
-        self.playlist: List[Path] = []
-        self.idx: int = 0
-        self._finished: Set[str] = set()
-        self.player: vlc.MediaPlayer | None = None
-        self._pl_path: Path | None = None
         self._cb = on_track_change
 
-        # debounced-write state
-        self._dirty_lock   = threading.Lock()
-        self._dirty        = False
-        self._last_update  = 0.0
-        self._pending: Dict | None = None
-        self._writer_th = threading.Thread(
-            target=self._writer_loop, daemon=True)
-        self._writer_th.start()
+        self.playlist: List[Path] = []
+        self.idx = 0
+        self._pl_path: Path | None = None
+        self._finished: Set[str] = set()
+        self.player: vlc.MediaPlayer | None = None
 
-    # ── VLC instance helpers ────────────────────────────────────────────
+        # debounced writer state
+        self._dirty_lock = threading.Lock()
+        self._dirty = False
+        self._pending: Dict | None = None
+        self._last_update = 0.0
+        self._writer = threading.Thread(target=self._writer_loop, daemon=True)
+        self._writer.start()
+
+    # ───────────────────────────────── VLC instance helpers
     def _make_instance(self):
         self._instance = vlc.Instance(
             ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
@@ -63,20 +57,35 @@ class VLCGaplessPlayer:
     def set_output(self, mode: str):
         if mode == self._aout_mode or mode not in AOUT_OPTS:
             return
+        mode_prev = self._aout_mode
         self._aout_mode = mode
-
+        # preserve current playlist
         cur_pl, cur_tracks = self._pl_path, list(self.playlist)
         cur_idx, cur_pos = self.idx, self.position()
-
         self.stop()
         self._make_instance()
-
         if cur_pl:
             self.load_playlist(cur_pl, cur_tracks)
-            self.idx = min(cur_idx, max(0, len(self.playlist) - 1))
+            self.idx = min(cur_idx, max(0, len(self.playlist)-1))
             self.seek(cur_pos)
+        else:
+            self._aout_mode = mode_prev   # rollback if nothing loaded
 
-    # ── media helpers ───────────────────────────────────────────────────
+    # ───────────────────────────────── playlist handling
+    def load_playlist(self, pl_path: Path, tracks: List[Path]):
+        self._pl_path = pl_path
+        self.playlist = tracks
+
+        hist = history.load(pl_path)
+        self.idx       = min(hist.get("track_index", 0),
+                             max(0, len(tracks)-1))
+        position       = float(hist.get("position", 0))
+        self._finished = set(hist.get("finished", []))
+
+        self._set_media(self.playlist[self.idx], resume=position)
+        self._cb()
+
+    # ───────────────────────────────── media helpers
     def _attach_end_event(self):
         self.player.event_manager().event_attach(
             vlc.EventType.MediaPlayerEndReached,
@@ -90,36 +99,19 @@ class VLCGaplessPlayer:
         self.player.set_media(self._instance.media_new(str(path)))
         self._attach_end_event()
         self.player.play()
-
         if resume:
-            for _ in range(10):
-                if self.player.get_length() > 0:
-                    break
+            for _ in range(10):           # wait for length to be known
+                if self.player.get_length() > 0: break
                 time.sleep(0.05)
             self.player.set_time(int(resume * 1000))
 
-    # ── public API ──────────────────────────────────────────────────────
-    def load_playlist(self, pl_path: Path, tracks: List[Path]):
-        self._pl_path = pl_path
-        self.playlist = tracks
-
-        hist = history.load(pl_path)
-        self.idx       = min(hist.get("track_index", 0),
-                             max(0, len(tracks) - 1))
-        position       = float(hist.get("position", 0))
-        self._finished = set(hist.get("finished", []))
-
-        self._set_media(self.playlist[self.idx], resume=position)
-        self._cb()
-
-    # controls
+    # ───────────────────────────────── controls
     def play(self):  self.player and self.player.play()
     def pause(self): self.player and self.player.pause()
     def stop(self):
         if self.player:
             self.player.stop(); self.player = None
 
-    # navigation
     def next_track(self):
         self._mark_finished()
         if self.idx + 1 < len(self.playlist):
@@ -133,7 +125,7 @@ class VLCGaplessPlayer:
             self._set_media(self.playlist[self.idx])
             self._cb()
 
-    # timing helpers
+    # ───────────────────────────────── position helpers
     def length(self) -> float:
         return (self.player.get_length() or 0) / 1000 if self.player else 0.0
     def position(self) -> float:
@@ -141,12 +133,12 @@ class VLCGaplessPlayer:
     def seek(self, s: float):
         self.player and self.player.set_time(int(s * 1000))
 
-    # internal
+    # mark current file finished when moving past it
     def _mark_finished(self):
         if self._pl_path and self.playlist:
             self._finished.add(str(self.playlist[self.idx]))
 
-    # ── debounced writer loop ───────────────────────────────────────────
+    # ───────────────────────────────── debounced writer thread
     def _writer_loop(self):
         while True:
             time.sleep(0.25)
@@ -164,7 +156,18 @@ class VLCGaplessPlayer:
                              data["position"],
                              data["finished"])
 
-    # ── tick (called from GUI every 100 ms) ────────────────────────────
+    # PUBLIC: synchronous flush for app exit
+    def flush_history(self):
+        with self._dirty_lock:
+            data = self._pending
+            self._dirty = False
+        if data:
+            history.save(data["pl_path"],
+                         data["track_index"],
+                         data["position"],
+                         data["finished"])
+
+    # ───────────────────────────────── tick (100 ms from GUI)
     def tick(self):
         if not (self.player and self._pl_path):
             return
