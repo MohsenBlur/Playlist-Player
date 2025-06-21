@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-# storage.py – rev-s2  (2025-06-27)
-"""
+# storage.py – rev-s3  (2025-06-30)
+r"""
 Persistent app-state helper.
 
-* Stores JSON in a per-user config directory
-  - Windows :  %APPDATA%\Playlist-Player\appstate.json
-  - Unix    :  ~/.playlist-player/appstate.json
+* Stores JSON in a per-user config directory  
+  – **Windows** :  ``%APPDATA%\\Playlist-Player\\appstate.json``  
+  – **Unix**    :  ``~/.playlist-player/appstate.json``  
 * Atomic write (tmp + replace) to avoid corruption.
+
+Only the doc-string was changed (`r"""…"""`) so Python no longer warns
+about the ``\P`` escape.  All functions behave exactly as before.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ CFG_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = CFG_DIR / "appstate.json"
 
 # ------------------------------------------------------------
-# 2. helpers
+# 2. atomic writer
 # ------------------------------------------------------------
 def _atomic_write(path: Path, data: Any) -> None:
     tmp = Path(tempfile.gettempdir()) / (path.name + ".tmp")
