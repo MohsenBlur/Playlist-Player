@@ -1,6 +1,6 @@
 # Playlist-Player
 
-A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playlists and plays them gap-lessly through VLC.
+A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playlists and plays them gap-lessly through VLC, and remembers playback history and position (per playlist).
 
 ---
 
