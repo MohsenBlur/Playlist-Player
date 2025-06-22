@@ -8,8 +8,9 @@ A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playli
 ## Features
 * **Folder scan** – add all playlists beneath a chosen directory  
 * **Gap-less playback** – powered by libVLC  
-* **Per-playlist history** – resumes where you left off  
-* **Embedded cover-art** – JPEG / PNG extracted automatically  
+* **Per-playlist history** – resumes where you left off
+* **Auto-resume** – optional, continue playing on startup
+* **Embedded cover-art** – JPEG / PNG extracted automatically
 * **Timeline seek** – click, drag or mouse-wheel (± 5 s, *Ctrl* ± 1 s)
 * **Light / Dark mode** – follows your OS theme
 * **Play/Pause hotkey** – responds to the global media key
