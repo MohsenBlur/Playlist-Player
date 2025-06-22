@@ -55,7 +55,7 @@ class VLCGaplessPlayer:
     def _make_instance(self):
         opts = ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
         if self._normalize:
-            opts.append("--af=normvol")
+            opts.append("--audio-filter=normvol")
         self._instance = vlc.Instance(opts)
 
     def set_output(self, mode: str):

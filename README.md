@@ -14,6 +14,7 @@ A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playli
 * **Timeline seek** – click, drag or mouse-wheel (± 5 s, *Ctrl* ± 1 s)
 * **Light / Dark mode** – follows your OS theme
 * **Play/Pause hotkey** – responds to the global media key
+* **Volume normalization** – optional filter for consistent loudness
 
 ---
 
