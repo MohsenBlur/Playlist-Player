@@ -44,6 +44,7 @@ class VLCGaplessPlayer:
         self._lock          = threading.Lock()
         self._pending: Dict | None = None
         self._last_write    = 0.0
+        self._closed        = False
         self._writer_th     = threading.Thread(target=self._writer_loop,
                                                daemon=True)
         self._writer_th.start()
@@ -155,7 +156,10 @@ class VLCGaplessPlayer:
         while True:
             time.sleep(0.5)
             with self._lock:
-                if not self._pending: continue
+                if self._closed:
+                    break
+                if not self._pending:
+                    continue
                 now = time.monotonic()
                 if now - self._last_write >= self.WRITE_INTERVAL:
                     snap = self._pending
@@ -163,10 +167,12 @@ class VLCGaplessPlayer:
                 else:
                     snap = None
             if snap:
-                history.save(snap["pl_path"],
-                             snap["track_index"],
-                             snap["position"],
-                             snap["finished"])
+                history.save(
+                    snap["pl_path"],
+                    snap["track_index"],
+                    snap["position"],
+                    snap["finished"],
+                )
 
     def flush_history(self):
         with self._lock:
@@ -177,6 +183,11 @@ class VLCGaplessPlayer:
                          snap["track_index"],
                          snap["position"],
                          snap["finished"])
+
+    def close(self):
+        self._closed = True
+        self.flush_history()
+        self._writer_th.join()
 
     # ─────────────────────────────── GUI tick (every 0.1 s)
     def tick(self):
