@@ -41,11 +41,21 @@ def _atomic_write(path: Path, data: Any) -> None:
 # ------------------------------------------------------------
 # 3. public API
 # ------------------------------------------------------------
-def load() -> List[dict]:
-    try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return []
 
-def save(records: List[dict]) -> None:
-    _atomic_write(STATE_FILE, records)
+def load() -> dict:
+    """Return ``{"playlists": [...], "last": "/path"}`` (or defaults)."""
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"playlists": [], "last": None}
+
+    if isinstance(data, list):
+        return {"playlists": data, "last": None}
+    if isinstance(data, dict):
+        return {"playlists": data.get("playlists", []), "last": data.get("last")}
+    return {"playlists": [], "last": None}
+
+
+def save(state: dict) -> None:
+    """Write app state to disk."""
+    _atomic_write(STATE_FILE, state)
