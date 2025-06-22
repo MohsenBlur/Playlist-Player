@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QListWidget, QListWidgetItem, QVBoxLayout,
     QHBoxLayout, QSplitter, QPushButton, QFileDialog, QInputDialog,
     QLabel, QMessageBox, QFrame, QComboBox, QSlider, QDialog,
-    QDialogButtonBox
+    QDialogButtonBox, QCheckBox
 )
 from PySide6.QtGui    import (
     QColor, QPalette, QPixmap, QIcon, QDragEnterEvent, QDropEvent
@@ -161,6 +161,7 @@ class MainWindow(QWidget):
         self._cur_pl_idx:Optional[int]=None
         self._meta_cache:Dict[Path,Tuple[str,str,Optional[Path]]]={}
         self._icon_cache:Dict[Path,QPixmap]={}
+        self._auto_resume=False
 
         self._load_state()
         self._player = player.VLCGaplessPlayer(self._on_track_change)
@@ -174,6 +175,13 @@ class MainWindow(QWidget):
                     lambda: QTimer.singleShot(0, self._toggle_play))
             except Exception:
                 self._hotkey=None
+
+        if self._auto_resume and self._cur_pl_idx is not None:
+            pl = self._playlists[self._cur_pl_idx]
+            self._player.load_playlist(pl.path, pl.tracks)
+            self.slider.setEnabled(True)
+            self._player.play()
+            self._on_track_change()
 
     # ---------- UI
     def _build_widgets(self):
@@ -203,9 +211,10 @@ class MainWindow(QWidget):
         tb=QHBoxLayout(); [tb.addWidget(b) for b in(self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete)]; tb.addStretch(); tb.addWidget(self.btn_prev); tb.addWidget(self.btn_next)
 
         self.btn_play = QPushButton("Play/Pause")
+        self.chk_resume = QCheckBox("Auto-resume")
         self.slider   = TimelineSlider(); self.slider.setEnabled(False)
         self.lbl_time = QLabel("00:00 / 00:00",alignment=Qt.AlignRight|Qt.AlignVCenter); self.lbl_time.setFixedWidth(110)
-        pb = QHBoxLayout(); pb.addWidget(self.btn_play); pb.addWidget(self.slider,1); pb.addWidget(self.lbl_time)
+        pb = QHBoxLayout(); pb.addWidget(self.btn_play); pb.addWidget(self.chk_resume); pb.addWidget(self.slider,1); pb.addWidget(self.lbl_time)
 
         root = QVBoxLayout(self); root.addLayout(tb); root.addWidget(split,1); root.addLayout(pb)
 
@@ -234,6 +243,7 @@ class MainWindow(QWidget):
         self.btn_prev.clicked.connect(self._player.prev_track)
         self.btn_next.clicked.connect(self._player.next_track)
         self.btn_play.clicked.connect(self._toggle_play)
+        self.chk_resume.stateChanged.connect(lambda *_: self._save_state())
 
     # ═════════════════ 5. drag & drop ═════════════════
     def dragEnterEvent(self,e:QDragEnterEvent):
@@ -315,6 +325,8 @@ class MainWindow(QWidget):
     # ═════════════════ 7. persistence ═════════════════
     def _load_state(self):
         state   = storage.load()
+        self._auto_resume = bool(state.get("auto_resume", False))
+        self.chk_resume.setChecked(self._auto_resume)
         last    = state.get("last")
         records = state.get("playlists", [])
         for rec in records:
@@ -334,9 +346,11 @@ class MainWindow(QWidget):
     def _save_state(self):
         last = str(self._player._pl_path) if self._player._pl_path else (
             str(self._playlists[self._cur_pl_idx].path) if self._cur_pl_idx is not None else None)
+        self._auto_resume = self.chk_resume.isChecked()
         state = {
             "playlists": [{"path": str(pl.path), "name": pl.name} for pl in self._playlists],
             "last": last,
+            "auto_resume": self._auto_resume,
         }
         storage.save(state)
         for pl in self._playlists:
