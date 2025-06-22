@@ -3,10 +3,11 @@
 r"""
 Persistent app-state helper
 ═══════════════════════════
-* Stores JSON in a per-user config directory  
-  – **Windows** :  ``%APPDATA%\Playlist-Player\appstate.json``  
-  – **Unix**    :  ``~/.playlist-player/appstate.json``  
+* Stores JSON in a per-user config directory
+  – **Windows** :  ``%APPDATA%\Playlist-Player\appstate.json``
+  – **Unix**    :  ``~/.playlist-player/appstate.json``
 * Atomic write (tmp + replace) to avoid corruption.
+* Persists optional flags like ``auto_resume`` and ``normalize``.
 
 (Only the doc-string was changed to a raw string so that back-slashes
 inside the Windows path example don’t trigger SyntaxWarnings.)
@@ -43,17 +44,31 @@ def _atomic_write(path: Path, data: Any) -> None:
 # ------------------------------------------------------------
 
 def load() -> dict:
-    """Return ``{"playlists": [...], "last": "/path"}`` (or defaults)."""
+    """Return persisted state or defaults.
+
+    Structure::
+        {
+            "playlists": [...],
+            "last": "/path" | None,
+            "auto_resume": bool,
+            "normalize": bool,
+        }
+    """
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {"playlists": [], "last": None}
+        return {"playlists": [], "last": None, "auto_resume": False, "normalize": False}
 
     if isinstance(data, list):
-        return {"playlists": data, "last": None}
+        return {"playlists": data, "last": None, "auto_resume": False, "normalize": False}
     if isinstance(data, dict):
-        return {"playlists": data.get("playlists", []), "last": data.get("last")}
-    return {"playlists": [], "last": None}
+        return {
+            "playlists": data.get("playlists", []),
+            "last": data.get("last"),
+            "auto_resume": data.get("auto_resume", False),
+            "normalize": data.get("normalize", False),
+        }
+    return {"playlists": [], "last": None, "auto_resume": False, "normalize": False}
 
 
 def save(state: dict) -> None:
