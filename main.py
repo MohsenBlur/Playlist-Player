@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple, Set
 APP_DIR  = Path(__file__).parent
 VENV_DIR = APP_DIR / ".venv"
 PYSIDE_REQ = "PySide6>=6.9.0" if sys.version_info >= (3, 13) else "PySide6>=6.7,<6.8"
-REQS = [PYSIDE_REQ, "python-vlc", "mutagen", "pillow"]
+REQS = [PYSIDE_REQ, "python-vlc", "mutagen", "pillow", "keyboard"]
 
 def _ensure_env() -> None:
     if getattr(sys, "frozen", False):
@@ -55,6 +55,10 @@ from mutagen          import File as MFile
 from mutagen.id3      import ID3
 from PIL              import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+try:
+    import keyboard
+except Exception:
+    keyboard = None
 
 import scanner, storage, player, history
 
@@ -162,6 +166,14 @@ class MainWindow(QWidget):
         self._player = player.VLCGaplessPlayer(self._on_track_change)
         self._wire_signals()
         QTimer(self,interval=100,timeout=self._tick).start()
+        self._hotkey=None
+        if keyboard:
+            try:
+                self._hotkey=keyboard.add_hotkey(
+                    'play/pause media',
+                    lambda: QTimer.singleShot(0, self._toggle_play))
+            except Exception:
+                self._hotkey=None
 
     # ---------- UI
     def _build_widgets(self):
@@ -459,6 +471,9 @@ class MainWindow(QWidget):
 
     # ═════════════════ 14. close ═════════════════
     def closeEvent(self,e):
+        if keyboard and self._hotkey is not None:
+            try: keyboard.remove_hotkey(self._hotkey)
+            except Exception: pass
         self._player.close(); self._save_state(); super().closeEvent(e)
 
 # ═════════════════ 15. entry-point ═════════════════

@@ -2,3 +2,4 @@ PySide6
 python-vlc
 mutagen
 Pillow
+keyboard
