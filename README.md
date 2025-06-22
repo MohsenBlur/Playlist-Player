@@ -33,6 +33,9 @@ A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playli
 git clone https://github.com/your-name/playlist-player.git
 cd playlist-player
 python main.py          # first run sets up a local .venv
+# alternatively install dependencies manually:
+pip install -r requirements.txt
+python main.py
 ````
 or
 ````
