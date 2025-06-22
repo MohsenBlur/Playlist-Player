@@ -139,9 +139,10 @@ class CreatePlaylistDialog(QDialog):
         if not rows: return
         dest = [r+delta for r in rows]
         if min(dest)<0 or max(dest)>=self.list.count(): return
-        items = [self.list.takeItem(r) for r in rows]
-        for r,it in sorted(zip(dest,items)):
-            self.list.insertItem(r,it); self.list.setItemSelected(it,True)
+        items = [self.list.takeItem(r) for r in reversed(rows)]
+        for r,it in zip(dest, reversed(items)):
+            self.list.insertItem(r,it)
+            self.list.setItemSelected(it,True)
 
     def tracks(self)->List[str]:
         return [self.list.item(i).text() for i in range(self.list.count())]
