@@ -314,18 +314,33 @@ class MainWindow(QWidget):
 
     # ═════════════════ 7. persistence ═════════════════
     def _load_state(self):
-        for rec in storage.load():
-            p=Path(rec["path"])
-            if not p.exists(): continue
-            pl=next((pl for pl in scanner.scan_playlists(p.parent,False) if pl.path==p),None)
+        state   = storage.load()
+        last    = state.get("last")
+        records = state.get("playlists", [])
+        for rec in records:
+            p = Path(rec["path"])
+            if not p.exists():
+                continue
+            pl = next((pl for pl in scanner.scan_playlists(p.parent, False) if pl.path == p), None)
             if pl:
-                hist_name=history.load(p).get("display_name",p.stem)
-                pl.name=rec.get("name",hist_name)
-                self._playlists.append(pl); self.list_playlists.addItem(pl.name)
+                hist_name = history.load(p).get("display_name", p.stem)
+                pl.name = rec.get("name", hist_name)
+                self._playlists.append(pl)
+                self.list_playlists.addItem(pl.name)
+        if last:
+            self._cur_pl_idx = next((i for i, pl in enumerate(self._playlists) if str(pl.path) == last), None)
+            self._highlight_row()
 
     def _save_state(self):
-        storage.save([{"path":str(pl.path),"name":pl.name} for pl in self._playlists])
-        for pl in self._playlists: history.ensure_name(pl.path,pl.name)
+        last = str(self._player._pl_path) if self._player._pl_path else (
+            str(self._playlists[self._cur_pl_idx].path) if self._cur_pl_idx is not None else None)
+        state = {
+            "playlists": [{"path": str(pl.path), "name": pl.name} for pl in self._playlists],
+            "last": last,
+        }
+        storage.save(state)
+        for pl in self._playlists:
+            history.ensure_name(pl.path, pl.name)
 
     # ═════════════════ 8. playlist management ═════════════════
     def _add_playlists(self,new:List[scanner.Playlist])->bool:
