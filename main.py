@@ -459,7 +459,7 @@ class MainWindow(QWidget):
 
     # ═════════════════ 14. close ═════════════════
     def closeEvent(self,e):
-        self._player.flush_history(); self._save_state(); super().closeEvent(e)
+        self._player.close(); self._save_state(); super().closeEvent(e)
 
 # ═════════════════ 15. entry-point ═════════════════
 if __name__ == "__main__":
