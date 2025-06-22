@@ -162,9 +162,11 @@ class MainWindow(QWidget):
         self._meta_cache:Dict[Path,Tuple[str,str,Optional[Path]]]={}
         self._icon_cache:Dict[Path,QPixmap]={}
         self._auto_resume=False
+        self._normalize=False
 
         self._load_state()
         self._player = player.VLCGaplessPlayer(self._on_track_change)
+        self._player.set_normalize(self._normalize)
         self._wire_signals()
         QTimer(self,interval=100,timeout=self._tick).start()
         self._hotkey=None
@@ -195,11 +197,13 @@ class MainWindow(QWidget):
         self._bar_play = QFrame(self.tracks_cur.viewport());  self._bar_play.setStyleSheet("background:#00c8ff;"); self._bar_play.setFixedWidth(2); self._bar_play.hide()
 
         self.cmb_output = QComboBox(); self.cmb_output.addItems(AUDIO_OPTIONS)
+        self.chk_normalize = QCheckBox("Normalize volume")
         self.lbl_cover  = QLabel(alignment=Qt.AlignCenter); self.lbl_cover.setFixedSize(self.ART_PX,self.ART_PX); self.lbl_cover.setStyleSheet("background:palette(Base);")
 
         sidebar = QWidget(); sv = QVBoxLayout(sidebar); sv.setContentsMargins(0,0,0,0)
         sv.addWidget(self.lbl_curtitle); sv.addWidget(self.tracks_cur,1)
         sv.addWidget(QLabel("Audio output")); sv.addWidget(self.cmb_output)
+        sv.addWidget(self.chk_normalize)
         sv.addStretch(); sv.addWidget(self.lbl_cover,0,Qt.AlignCenter)
 
         split = QSplitter(Qt.Horizontal)
@@ -244,6 +248,9 @@ class MainWindow(QWidget):
         self.btn_next.clicked.connect(self._player.next_track)
         self.btn_play.clicked.connect(self._toggle_play)
         self.chk_resume.stateChanged.connect(lambda *_: self._save_state())
+        self.chk_normalize.stateChanged.connect(
+            lambda s: (self._player.set_normalize(bool(s)), self._save_state())
+        )
 
     # ═════════════════ 5. drag & drop ═════════════════
     def dragEnterEvent(self,e:QDragEnterEvent):
@@ -327,6 +334,9 @@ class MainWindow(QWidget):
         state   = storage.load()
         self._auto_resume = bool(state.get("auto_resume", False))
         self.chk_resume.setChecked(self._auto_resume)
+        self._normalize   = bool(state.get("normalize", False))
+        if hasattr(self, 'chk_normalize'):
+            self.chk_normalize.setChecked(self._normalize)
         last    = state.get("last")
         records = state.get("playlists", [])
         for rec in records:
@@ -347,10 +357,12 @@ class MainWindow(QWidget):
         last = str(self._player._pl_path) if self._player._pl_path else (
             str(self._playlists[self._cur_pl_idx].path) if self._cur_pl_idx is not None else None)
         self._auto_resume = self.chk_resume.isChecked()
+        self._normalize   = self.chk_normalize.isChecked()
         state = {
             "playlists": [{"path": str(pl.path), "name": pl.name} for pl in self._playlists],
             "last": last,
             "auto_resume": self._auto_resume,
+            "normalize": self._normalize,
         }
         storage.save(state)
         for pl in self._playlists:

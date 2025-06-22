@@ -28,9 +28,11 @@ class VLCGaplessPlayer:
     WRITE_INTERVAL = 5.0          # seconds between scheduled writes
 
     def __init__(self, on_track_change: Callable[[], None]):
-        self._aout_mode     = "default"
-        self._instance      = vlc.Instance(["--no-video", "--quiet"])
-        self._cb            = on_track_change
+        self._aout_mode  = "default"
+        self._normalize  = False
+        self._cb         = on_track_change
+        self._instance   = None
+        self._make_instance()
 
         self._next_pending  = False
 
@@ -51,9 +53,10 @@ class VLCGaplessPlayer:
 
     # ─────────────────────────────── instance / output
     def _make_instance(self):
-        self._instance = vlc.Instance(
-            ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
-        )
+        opts = ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
+        if self._normalize:
+            opts.append("--af=normvol")
+        self._instance = vlc.Instance(opts)
 
     def set_output(self, mode: str):
         if mode == self._aout_mode or mode not in AOUT_OPTS:
@@ -69,6 +72,21 @@ class VLCGaplessPlayer:
             self.seek(cur_pos)
         else:
             self._aout_mode = prev
+
+    def set_normalize(self, enable: bool):
+        if enable == self._normalize:
+            return
+        prev = self._normalize
+        self._normalize = enable
+        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
+        cur_idx, cur_pos   = self.idx, self.position()
+        self.stop(); self._make_instance()
+        if cur_pl:
+            self.load_playlist(cur_pl, cur_tracks)
+            self.idx = min(cur_idx, max(0, len(self.playlist)-1))
+            self.seek(cur_pos)
+        else:
+            self._normalize = prev
 
     # ─────────────────────────────── playlist handling
     def load_playlist(self, pl_path: Path, tracks: List[Path]):
