@@ -68,20 +68,174 @@ AUDIO_OPTIONS = ["System default", "DirectSound", "WASAPI shared", "WASAPI exclu
 AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
 
 # color themes: name -> palette colors
-THEMES_LIGHT={
-    "Light": {"window":"#ffffff","text":"#000000","button":"#f0f0f0","base":"#ffffff","highlight":"#3daee9","highlight_text":"#000000"},
-    "Ocean Breeze": {"window":"#e0f7fa","text":"#004d40","button":"#b2ebf2","base":"#ffffff","highlight":"#00838f","highlight_text":"#ffffff"},
-    "Forest Morning": {"window":"#e8f5e9","text":"#1b5e20","button":"#c8e6c9","base":"#ffffff","highlight":"#43a047","highlight_text":"#ffffff"},
-    "Rose Petal": {"window":"#fce4ec","text":"#880e4f","button":"#f8bbd0","base":"#ffffff","highlight":"#c2185b","highlight_text":"#ffffff"},
-    "Sunny Day": {"window":"#fffde7","text":"#f57f17","button":"#fff9c4","base":"#ffffff","highlight":"#ffb300","highlight_text":"#000000"}
+# ── 10 LIGHT THEMES ──
+THEMES_LIGHT = {
+    "Mocha Sunrise": {
+        "window": "#FFF7F0",  # warm latte
+        "text":   "#3C2B1A",
+        "button": "#F3E1D3",
+        "base":   "#F8ECD9",  # beige ≠ window
+        "highlight": "#C78A5F",  # Pantone Mocha Mousse 2025
+        "highlight_text": "#000000",
+    },
+    "Peach Sky": {
+        "window": "#FFF1EB",
+        "text":   "#3A0D0D",
+        "button": "#FFE4D1",
+        "base":   "#E6F4FF",  # airy blue counterpoint
+        "highlight": "#46A0FF",
+        "highlight_text": "#FFFFFF",
+    },
+    "Butter Blue": {
+        "window": "#FFFFF4",
+        "text":   "#003030",
+        "button": "#FFF5BC",
+        "base":   "#E5F9F5",  # mint-teal
+        "highlight": "#007C70",
+        "highlight_text": "#FFFFFF",
+    },
+    "Powder Rose": {
+        "window": "#FFF5FA",
+        "text":   "#013220",
+        "button": "#FFE9F3",
+        "base":   "#F1FFF5",  # soft mint
+        "highlight": "#19A974",
+        "highlight_text": "#000000",
+    },
+    "Aurora Mint": {
+        "window": "#F4FFF9",
+        "text":   "#251846",
+        "button": "#E5FDEB",
+        "base":   "#FFF4F9",  # pastel peach
+        "highlight": "#B472FF",
+        "highlight_text": "#FFFFFF",
+    },
+    "Canyon Breeze": {
+        "window": "#ECF4FF",
+        "text":   "#1D3557",
+        "button": "#FCEDE7",
+        "base":   "#FFF9E6",  # mustard-cream
+        "highlight": "#F3B941",
+        "highlight_text": "#000000",
+    },
+    "Serene Lilac": {
+        "window": "#F5F3FF",
+        "text":   "#202040",
+        "button": "#E8E6FF",
+        "base":   "#EFFFF9",  # mint tint
+        "highlight": "#5E60CE",
+        "highlight_text": "#FFFFFF",
+    },
+    "Coral Mint": {
+        "window": "#FFF7F5",
+        "text":   "#044444",
+        "button": "#FFE9E6",
+        "base":   "#E5FFF6",
+        "highlight": "#FF6F61",
+        "highlight_text": "#000000",
+    },
+    "Hazy Meadow": {
+        "window": "#F5FFF6",
+        "text":   "#243E14",
+        "button": "#EBFFEC",
+        "base":   "#FFF9E0",  # pale butter
+        "highlight": "#55AA00",
+        "highlight_text": "#000000",
+    },
+    "Cloud Pop": {
+        "window": "#F0FAFF",
+        "text":   "#003366",
+        "button": "#E5F5FF",
+        "base":   "#FFF0F4",  # blush
+        "highlight": "#FF72B6",
+        "highlight_text": "#FFFFFF",
+    },
 }
-THEMES_DARK={
-    "Dark": {"window":"#2b2b2b","text":"#dddddd","button":"#3c3c3c","base":"#4a4a4a","highlight":"#3daee9","highlight_text":"#000000"},
-    "Midnight": {"window":"#121212","text":"#e0e0e0","button":"#1e1e1e","base":"#1e1e1e","highlight":"#bb86fc","highlight_text":"#000000"},
-    "Dracula": {"window":"#282a36","text":"#f8f8f2","button":"#44475a","base":"#44475a","highlight":"#bd93f9","highlight_text":"#000000"},
-    "Monokai": {"window":"#272822","text":"#f8f8f2","button":"#373831","base":"#272822","highlight":"#a6e22e","highlight_text":"#000000"},
-    "Slate": {"window":"#1f1f28","text":"#c5c8c6","button":"#282a36","base":"#282a36","highlight":"#8abeb7","highlight_text":"#000000"}
+
+# ── 10 DARK THEMES ──
+THEMES_DARK = {
+    "Neo Noir": {
+        "window": "#1B1B22",
+        "text":   "#E8E8F2",
+        "button": "#24242E",
+        "base":   "#0E0E13",
+        "highlight": "#FF007C",
+        "highlight_text": "#000000",
+    },
+    "Mocha Night": {
+        "window": "#3E2A1F",
+        "text":   "#F5E6D8",
+        "button": "#4A3226",
+        "base":   "#2A1C15",
+        "highlight": "#C78A5F",
+        "highlight_text": "#000000",
+    },
+    "Neon Depths": {
+        "window": "#0D1B1B",
+        "text":   "#CDEEEE",
+        "button": "#162626",
+        "base":   "#000F0F",
+        "highlight": "#00FF87",
+        "highlight_text": "#000000",
+    },
+    "Cosmic Violet": {
+        "window": "#1E102D",
+        "text":   "#E0D1FF",
+        "button": "#29173E",
+        "base":   "#12071F",
+        "highlight": "#C770FF",
+        "highlight_text": "#000000",
+    },
+    "Midnight Ember": {
+        "window": "#121826",
+        "text":   "#F2E5DA",
+        "button": "#1D2534",
+        "base":   "#080C13",
+        "highlight": "#FF8A00",
+        "highlight_text": "#000000",
+    },
+    "Synthwave": {
+        "window": "#0C0C14",
+        "text":   "#E6E6E6",
+        "button": "#171720",
+        "base":   "#000000",
+        "highlight": "#00CFFF",
+        "highlight_text": "#000000",
+    },
+    "Obsidian Green": {
+        "window": "#121915",
+        "text":   "#D5EAD0",
+        "button": "#1A231F",
+        "base":   "#070B08",
+        "highlight": "#00B84E",
+        "highlight_text": "#000000",
+    },
+    "Deep Indigo": {
+        "window": "#131328",
+        "text":   "#D0D0FF",
+        "button": "#1B1B3C",
+        "base":   "#06061A",
+        "highlight": "#5E60CE",
+        "highlight_text": "#FFFFFF",
+    },
+    "Galaxy Stone": {
+        "window": "#161616",
+        "text":   "#EAEAEA",
+        "button": "#1F1F1F",
+        "base":   "#0A0A0A",
+        "highlight": "#1E90FF",
+        "highlight_text": "#000000",
+    },
+    "Bronze Eclipse": {
+        "window": "#21170F",
+        "text":   "#F3DDBB",
+        "button": "#2B1F16",
+        "base":   "#0D0805",
+        "highlight": "#FFB45A",
+        "highlight_text": "#000000",
+    },
 }
+
 THEMES={"System":None,**THEMES_LIGHT,**THEMES_DARK}
 
 ART_DIR = Path.home()/".playlist-relinker-cache"/"art"; ART_DIR.mkdir(parents=True, exist_ok=True)
