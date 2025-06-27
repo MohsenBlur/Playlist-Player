@@ -66,6 +66,21 @@ import scanner, storage, player, history
 ICON_PATH  = APP_DIR / "Playlist-Player_logo.ico"
 AUDIO_OPTIONS = ["System default", "DirectSound", "WASAPI shared", "WASAPI exclusive"]
 AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
+
+# color themes: name -> palette colors
+THEMES = {
+    "System": None,
+    "Light":  {"window":"#ffffff", "text":"#000000", "button":"#f0f0f0", "base":"#ffffff",
+                "highlight":"#3daee9", "highlight_text":"#ffffff"},
+    "Dark":   {"window":"#2b2b2b", "text":"#dddddd", "button":"#3c3c3c", "base":"#4a4a4a",
+                "highlight":"#3daee9", "highlight_text":"#000000"},
+    "Ocean":  {"window":"#e0f7fa", "text":"#004d40", "button":"#b2ebf2", "base":"#ffffff",
+                "highlight":"#00838f", "highlight_text":"#ffffff"},
+    "Forest": {"window":"#e8f5e9", "text":"#1b5e20", "button":"#c8e6c9", "base":"#ffffff",
+                "highlight":"#43a047", "highlight_text":"#ffffff"},
+    "Plum":   {"window":"#f3e5f5", "text":"#4a148c", "button":"#e1bee7", "base":"#ffffff",
+                "highlight":"#6a1b9a", "highlight_text":"#ffffff"},
+}
 ART_DIR = Path.home()/".playlist-relinker-cache"/"art"; ART_DIR.mkdir(parents=True, exist_ok=True)
 TICKS, MAX_SECONDS = 10, 86_400   # slider: 100 ms per tick; clamp 24 h
 
@@ -165,12 +180,14 @@ class MainWindow(QWidget):
         self._auto_resume=False
         self._normalize=False
         self._compress=False
+        self._theme="System"
 
         self._load_state()
         self._player = player.VLCGaplessPlayer(self._on_track_change)
         self._player.set_normalize(self._normalize)
         self._player.set_compress(self._compress)
         self._wire_signals()
+        self._apply_theme(self._theme)
         QTimer(self,interval=100,timeout=self._tick).start()
         self._hotkey=None
         if keyboard:
@@ -215,8 +232,9 @@ class MainWindow(QWidget):
         split.setSizes([240,460,300])
 
         self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete=(QPushButton(t) for t in ("Create","Scan","Rename","Delete"))
+        self.cmb_theme = QComboBox(); self.cmb_theme.addItems(list(THEMES.keys()))
         self.btn_prev=QPushButton("Prev"); self.btn_next=QPushButton("Next")
-        tb=QHBoxLayout(); [tb.addWidget(b) for b in(self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete)]; tb.addStretch(); tb.addWidget(self.btn_prev); tb.addWidget(self.btn_next)
+        tb=QHBoxLayout(); [tb.addWidget(b) for b in(self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete)]; tb.addStretch(); tb.addWidget(self.cmb_theme); tb.addWidget(self.btn_prev); tb.addWidget(self.btn_next)
 
         self.btn_play = QPushButton("Play/Pause")
         self.chk_resume = QCheckBox("Auto-resume")
@@ -238,6 +256,28 @@ class MainWindow(QWidget):
             f"QPushButton:hover {{background:{hover};}}"
         )
 
+    def _apply_theme(self,name:str):
+        app=QApplication.instance()
+        if not app:
+            return
+        self._theme=name
+        cfg=THEMES.get(name)
+        if cfg is None:
+            pal=app.style().standardPalette()
+        else:
+            pal=QPalette()
+            pal.setColor(QPalette.Window, QColor(cfg["window"]))
+            pal.setColor(QPalette.WindowText, QColor(cfg["text"]))
+            pal.setColor(QPalette.Base, QColor(cfg.get("base", cfg["window"])))
+            pal.setColor(QPalette.Text, QColor(cfg["text"]))
+            pal.setColor(QPalette.Button, QColor(cfg["button"]))
+            pal.setColor(QPalette.ButtonText, QColor(cfg["text"]))
+            pal.setColor(QPalette.Highlight, QColor(cfg["highlight"]))
+            pal.setColor(QPalette.HighlightedText, QColor(cfg["highlight_text"]))
+        app.setPalette(pal)
+        self._init_style()
+        self._refresh_sel(); self._refresh_cur(); self._highlight_row()
+
     # ---------- signals
     def _wire_signals(self):
         self.slider.jumpRequested.connect(self._player.seek)
@@ -258,6 +298,7 @@ class MainWindow(QWidget):
         self.chk_compress.stateChanged.connect(
             lambda s: (self._player.set_compress(bool(s)), self._save_state())
         )
+        self.cmb_theme.currentTextChanged.connect(lambda n:(self._apply_theme(n), self._save_state()))
 
     # ═════════════════ 5. drag & drop ═════════════════
     def dragEnterEvent(self,e:QDragEnterEvent):
@@ -339,6 +380,11 @@ class MainWindow(QWidget):
     # ═════════════════ 7. persistence ═════════════════
     def _load_state(self):
         state   = storage.load()
+        self._theme = state.get("theme", "System")
+        if hasattr(self, 'cmb_theme'):
+            idx = self.cmb_theme.findText(self._theme)
+            if idx != -1:
+                self.cmb_theme.setCurrentIndex(idx)
         self._auto_resume = bool(state.get("auto_resume", False))
         self.chk_resume.setChecked(self._auto_resume)
         self._normalize   = bool(state.get("normalize", False))
@@ -375,6 +421,7 @@ class MainWindow(QWidget):
             "auto_resume": self._auto_resume,
             "normalize": self._normalize,
             "compress": self._compress,
+            "theme": self._theme,
         }
         storage.save(state)
         for pl in self._playlists:

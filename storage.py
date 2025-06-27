@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# storage.py – rev-s4  (2025-06-30)
+# storage.py – rev-s5  (2025-06-30)
 r"""
 Persistent app-state helper
 ═══════════════════════════
@@ -53,15 +53,16 @@ def load() -> dict:
             "auto_resume": bool,
             "normalize": bool,
             "compress": bool,
+            "theme": str,
         }
     """
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {"playlists": [], "last": None, "auto_resume": False, "normalize": False, "compress": False}
+        return {"playlists": [], "last": None, "auto_resume": False, "normalize": False, "compress": False, "theme": "System"}
 
     if isinstance(data, list):
-        return {"playlists": data, "last": None, "auto_resume": False, "normalize": False, "compress": False}
+        return {"playlists": data, "last": None, "auto_resume": False, "normalize": False, "compress": False, "theme": "System"}
     if isinstance(data, dict):
         return {
             "playlists": data.get("playlists", []),
@@ -69,8 +70,9 @@ def load() -> dict:
             "auto_resume": data.get("auto_resume", False),
             "normalize": data.get("normalize", False),
             "compress": data.get("compress", False),
+            "theme": data.get("theme", "System"),
         }
-    return {"playlists": [], "last": None, "auto_resume": False, "normalize": False, "compress": False}
+    return {"playlists": [], "last": None, "auto_resume": False, "normalize": False, "compress": False, "theme": "System"}
 
 
 def save(state: dict) -> None:
