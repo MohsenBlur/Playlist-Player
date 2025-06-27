@@ -116,6 +116,25 @@ requiring Python on the target system.
 
 ---
 
+## Troubleshooting
+
+If you see an error like
+
+```
+ModuleNotFoundError: No module named 'keyboard'
+```
+
+the dependencies were not installed. The first run requires an internet
+connection so `pip` can download packages. Either run `python main.py`
+once so the script can bootstrap a local **`.venv/`** (with network
+access) or install them manually using:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
 ## License
 
 MIT – free to use, modify, and distribute.

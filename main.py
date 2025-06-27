@@ -30,10 +30,16 @@ def _ensure_env() -> None:
         return
     if not VENV_DIR.exists():
         venv.create(VENV_DIR, with_pip=True)
-        subprocess.check_call([
-            VENV_DIR / ("Scripts" if os.name=="nt" else "bin") / "pip",
-            "install", *REQS, "--quiet"
-        ])
+        try:
+            subprocess.check_call([
+                VENV_DIR / ("Scripts" if os.name=="nt" else "bin") / "pip",
+                "install", *REQS, "--quiet"
+            ])
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "Failed to install dependencies. "
+                "Run 'pip install -r requirements.txt' manually."
+            ) from e
     sp = (VENV_DIR/"Lib/site-packages") if os.name=="nt" else \
          next((VENV_DIR/"lib").glob("python*/site-packages"))
     site.addsitedir(sp)
