@@ -52,23 +52,25 @@ def load() -> dict:
             "last": "/path" | None,
             "auto_resume": bool,
             "normalize": bool,
+            "compress": bool,
         }
     """
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {"playlists": [], "last": None, "auto_resume": False, "normalize": False}
+        return {"playlists": [], "last": None, "auto_resume": False, "normalize": False, "compress": False}
 
     if isinstance(data, list):
-        return {"playlists": data, "last": None, "auto_resume": False, "normalize": False}
+        return {"playlists": data, "last": None, "auto_resume": False, "normalize": False, "compress": False}
     if isinstance(data, dict):
         return {
             "playlists": data.get("playlists", []),
             "last": data.get("last"),
             "auto_resume": data.get("auto_resume", False),
             "normalize": data.get("normalize", False),
+            "compress": data.get("compress", False),
         }
-    return {"playlists": [], "last": None, "auto_resume": False, "normalize": False}
+    return {"playlists": [], "last": None, "auto_resume": False, "normalize": False, "compress": False}
 
 
 def save(state: dict) -> None:
