@@ -98,9 +98,12 @@ playlist-player/
 ## Windows Packaging
 
 Run the provided **`build_windows.bat`** script to create a standalone
-executable using PyInstaller. Make sure Python 3 is available in your
-`PATH`. The script prefers the `py` launcher but falls back to `python`
-if the launcher is not installed:
+executable using PyInstaller. The script builds inside a temporary
+virtual environment so it doesn't touch your global Python install.
+Dependencies from `requirements.txt` (including **`mutagen`**) are
+installed into that venv before PyInstaller runs. Ensure Python 3 is
+available in your `PATH` – the script prefers the `py` launcher but
+falls back to `python` if the launcher is not installed:
 
 ```cmd
 build_windows.bat

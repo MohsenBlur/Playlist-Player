@@ -12,6 +12,7 @@
 
 setlocal EnableExtensions
 cd /d "%~dp0"
+set "VENV=.build-venv"
 
 REM Determine Python launcher
 where py >nul 2>nul
@@ -22,22 +23,36 @@ if %errorlevel%==0 (
 )
 
 REM ────────────────────────────────────────────────
-REM Step 0 : generate high-DPI multi-resolution icon
+REM Step 0 : create isolated build environment
+REM ────────────────────────────────────────────────
+%PY% -m venv "%VENV%"
+if errorlevel 1 goto :error
+set "VPY=%VENV%\Scripts\python.exe"
+
+REM ────────────────────────────────────────────────
+REM Step 1 : install dependencies into venv
+REM ────────────────────────────────────────────────
+"%VPY%" -m pip install --upgrade pip >nul
+"%VPY%" -m pip install --quiet -r requirements.txt
+if errorlevel 1 goto :error
+
+REM ────────────────────────────────────────────────
+REM Step 2 : generate high-DPI multi-resolution icon
 REM           (16,24,32,48,64,128,256-px layers)
 REM ────────────────────────────────────────────────
-%PY% make_icon.py
+"%VPY%" make_icon.py
 if errorlevel 1 goto :error
 
 REM ────────────────────────────────────────────────
-REM Step 1 : install / upgrade PyInstaller
+REM Step 3 : install / upgrade PyInstaller in venv
 REM ────────────────────────────────────────────────
-%PY% -m pip install --upgrade --quiet pyinstaller
+"%VPY%" -m pip install --upgrade --quiet pyinstaller
 if errorlevel 1 goto :error
 
 REM ────────────────────────────────────────────────
-REM Step 2 : build GUI executable
+REM Step 4 : build GUI executable
 REM ────────────────────────────────────────────────
-%PY% -m PyInstaller ^
+"%VPY%" -m PyInstaller ^
     --name "Playlist-Player" ^
     --onefile ^
     --noconsole ^
