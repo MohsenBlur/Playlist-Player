@@ -69,7 +69,7 @@ AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
 
 # color themes: name -> palette colors
 THEMES_LIGHT={
-    "Light": {"window":"#ffffff","text":"#000000","button":"#f0f0f0","base":"#ffffff","highlight":"#3daee9","highlight_text":"#ffffff"},
+    "Light": {"window":"#ffffff","text":"#000000","button":"#f0f0f0","base":"#ffffff","highlight":"#3daee9","highlight_text":"#000000"},
     "Ocean Breeze": {"window":"#e0f7fa","text":"#004d40","button":"#b2ebf2","base":"#ffffff","highlight":"#00838f","highlight_text":"#ffffff"},
     "Forest Morning": {"window":"#e8f5e9","text":"#1b5e20","button":"#c8e6c9","base":"#ffffff","highlight":"#43a047","highlight_text":"#ffffff"},
     "Rose Petal": {"window":"#fce4ec","text":"#880e4f","button":"#f8bbd0","base":"#ffffff","highlight":"#c2185b","highlight_text":"#ffffff"},
@@ -86,6 +86,13 @@ THEMES={"System":None,**THEMES_LIGHT,**THEMES_DARK}
 
 ART_DIR = Path.home()/".playlist-relinker-cache"/"art"; ART_DIR.mkdir(parents=True, exist_ok=True)
 TICKS, MAX_SECONDS = 10, 86_400   # slider: 100 ms per tick; clamp 24 h
+
+def contrast_text_color(bg_hex: str) -> str:
+    """Return black or white depending on background brightness."""
+    bg_hex = bg_hex.lstrip('#')
+    r, g, b = (int(bg_hex[i:i+2], 16) for i in (0, 2, 4))
+    brightness = 0.299 * r + 0.587 * g + 0.114 * b
+    return "#000000" if brightness > 186 else "#ffffff"
 
 def strip_dpr(px: QPixmap) -> QPixmap:
     dpr = px.devicePixelRatioF()
@@ -277,7 +284,8 @@ class MainWindow(QWidget):
             pal.setColor(QPalette.Button, QColor(cfg["button"]))
             pal.setColor(QPalette.ButtonText, QColor(cfg["text"]))
             pal.setColor(QPalette.Highlight, QColor(cfg["highlight"]))
-            pal.setColor(QPalette.HighlightedText, QColor(cfg["highlight_text"]))
+            hl_text = cfg.get("highlight_text") or contrast_text_color(cfg["highlight"])
+            pal.setColor(QPalette.HighlightedText, QColor(hl_text))
         app.setPalette(pal)
         self._init_style()
         self._refresh_sel(); self._refresh_cur(); self._highlight_row()
