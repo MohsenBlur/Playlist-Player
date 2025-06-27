@@ -13,23 +13,31 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+REM Determine Python launcher
+where py >nul 2>nul
+if %errorlevel%==0 (
+    set "PY=py -3"
+) else (
+    set "PY=python"
+)
+
 REM ────────────────────────────────────────────────
 REM Step 0 : generate high-DPI multi-resolution icon
 REM           (16,24,32,48,64,128,256-px layers)
 REM ────────────────────────────────────────────────
-py -3 make_icon.py
+%PY% make_icon.py
 if errorlevel 1 goto :error
 
 REM ────────────────────────────────────────────────
 REM Step 1 : install / upgrade PyInstaller
 REM ────────────────────────────────────────────────
-py -3 -m pip install --upgrade --quiet pyinstaller
+%PY% -m pip install --upgrade --quiet pyinstaller
 if errorlevel 1 goto :error
 
 REM ────────────────────────────────────────────────
 REM Step 2 : build GUI executable
 REM ────────────────────────────────────────────────
-py -3 -m PyInstaller ^
+%PY% -m PyInstaller ^
     --name "Playlist-Player" ^
     --onefile ^
     --noconsole ^

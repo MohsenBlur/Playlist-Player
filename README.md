@@ -98,7 +98,9 @@ playlist-player/
 ## Windows Packaging
 
 Run the provided **`build_windows.bat`** script to create a standalone
-executable using PyInstaller:
+executable using PyInstaller. Make sure Python 3 is available in your
+`PATH`. The script prefers the `py` launcher but falls back to `python`
+if the launcher is not installed:
 
 ```cmd
 build_windows.bat
