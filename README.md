@@ -13,7 +13,7 @@ A minimal, Python-Qt music player that opens **`.m3u / .m3u8 / .fplite`** playli
 * **Embedded cover-art** – JPEG / PNG extracted automatically
 * **Timeline seek** – click, drag or mouse-wheel (± 5 s, *Ctrl* ± 1 s)
 * **Light / Dark mode** – follows your OS theme
-* **Play/Pause hotkey** – responds to the global media key
+* **Play/Pause hotkey** – responds to the global media key (requires `keyboard` on Windows)
 * **Volume normalization** – optional filter for consistent loudness
 * ✓ **Volume boost (compressor)** – amplifies quiet tracks
 
@@ -54,7 +54,9 @@ On first launch the script creates **`.venv/`** beside itself and installs:
 * `python-vlc` – VLC Python wrapper
 * `mutagen` – tag & cover-art reader
 * `Pillow` – image helpers
-* `keyboard` – global hotkey listener
+* `keyboard` – global hotkey listener (required on Windows)
+    * On Linux, capturing the media key may require running the app as root.
+    * Global hotkeys are not fully supported on macOS.
 
 You do **not** need to install these manually.
 
