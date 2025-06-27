@@ -55,10 +55,14 @@ from mutagen          import File as MFile
 from mutagen.id3      import ID3
 from PIL              import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-try:
+if os.name == 'nt':
+    # The keyboard module is mandatory on Windows for global media hotkeys
     import keyboard
-except Exception:
-    keyboard = None
+else:
+    try:
+        import keyboard
+    except Exception:
+        keyboard = None
 
 import scanner, storage, player, history
 
@@ -359,7 +363,10 @@ class MainWindow(QWidget):
                 self._hotkey=keyboard.add_hotkey(
                     'play/pause media',
                     lambda: QTimer.singleShot(0, self._toggle_play))
-            except Exception:
+            except Exception as e:
+                if os.name == 'nt':
+                    raise RuntimeError(
+                        f"Failed to register media hotkey: {e}") from e
                 self._hotkey=None
 
         if self._auto_resume and self._cur_pl_idx is not None:
