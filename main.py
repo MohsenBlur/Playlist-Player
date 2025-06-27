@@ -361,12 +361,10 @@ class MainWindow(QWidget):
         if keyboard:
             try:
                 self._hotkey=keyboard.add_hotkey(
-                    'play/pause media',
+                    'play/pause',
                     lambda: QTimer.singleShot(0, self._toggle_play))
             except Exception as e:
-                if os.name == 'nt':
-                    raise RuntimeError(
-                        f"Failed to register media hotkey: {e}") from e
+                print(f"Media key not available: {e}")
                 self._hotkey=None
 
         if self._auto_resume and self._cur_pl_idx is not None:
