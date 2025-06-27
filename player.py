@@ -30,6 +30,7 @@ class VLCGaplessPlayer:
     def __init__(self, on_track_change: Callable[[], None]):
         self._aout_mode  = "default"
         self._normalize  = False
+        self._compress   = False
         self._cb         = on_track_change
         self._instance   = None
         self._make_instance()
@@ -54,8 +55,14 @@ class VLCGaplessPlayer:
     # ─────────────────────────────── instance / output
     def _make_instance(self):
         opts = ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
+        filters = []
         if self._normalize:
-            opts.append("--audio-filter=normvol")
+            filters.append("normvol")
+        if self._compress:
+            filters.append("compressor")
+            opts.append("--compressor-makeup-gain=12")
+        if filters:
+            opts.append("--audio-filter=" + ",".join(filters))
         self._instance = vlc.Instance(opts)
 
     def set_output(self, mode: str):
@@ -87,6 +94,21 @@ class VLCGaplessPlayer:
             self.seek(cur_pos)
         else:
             self._normalize = prev
+
+    def set_compress(self, enable: bool):
+        if enable == self._compress:
+            return
+        prev = self._compress
+        self._compress = enable
+        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
+        cur_idx, cur_pos   = self.idx, self.position()
+        self.stop(); self._make_instance()
+        if cur_pl:
+            self.load_playlist(cur_pl, cur_tracks)
+            self.idx = min(cur_idx, max(0, len(self.playlist)-1))
+            self.seek(cur_pos)
+        else:
+            self._compress = prev
 
     # ─────────────────────────────── playlist handling
     def load_playlist(self, pl_path: Path, tracks: List[Path]):

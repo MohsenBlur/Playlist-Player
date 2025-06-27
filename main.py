@@ -164,10 +164,12 @@ class MainWindow(QWidget):
         self._icon_cache:Dict[Path,QPixmap]={}
         self._auto_resume=False
         self._normalize=False
+        self._compress=False
 
         self._load_state()
         self._player = player.VLCGaplessPlayer(self._on_track_change)
         self._player.set_normalize(self._normalize)
+        self._player.set_compress(self._compress)
         self._wire_signals()
         QTimer(self,interval=100,timeout=self._tick).start()
         self._hotkey=None
@@ -199,12 +201,13 @@ class MainWindow(QWidget):
 
         self.cmb_output = QComboBox(); self.cmb_output.addItems(AUDIO_OPTIONS)
         self.chk_normalize = QCheckBox("Normalize volume")
+        self.chk_compress  = QCheckBox("Boost quiet audio")
         self.lbl_cover  = QLabel(alignment=Qt.AlignCenter); self.lbl_cover.setFixedSize(self.ART_PX,self.ART_PX); self.lbl_cover.setStyleSheet("background:palette(Base);")
 
         sidebar = QWidget(); sv = QVBoxLayout(sidebar); sv.setContentsMargins(0,0,0,0)
         sv.addWidget(self.lbl_curtitle); sv.addWidget(self.tracks_cur,1)
         sv.addWidget(QLabel("Audio output")); sv.addWidget(self.cmb_output)
-        sv.addWidget(self.chk_normalize)
+        sv.addWidget(self.chk_normalize); sv.addWidget(self.chk_compress)
         sv.addStretch(); sv.addWidget(self.lbl_cover,0,Qt.AlignCenter)
 
         split = QSplitter(Qt.Horizontal)
@@ -251,6 +254,9 @@ class MainWindow(QWidget):
         self.chk_resume.stateChanged.connect(lambda *_: self._save_state())
         self.chk_normalize.stateChanged.connect(
             lambda s: (self._player.set_normalize(bool(s)), self._save_state())
+        )
+        self.chk_compress.stateChanged.connect(
+            lambda s: (self._player.set_compress(bool(s)), self._save_state())
         )
 
     # ═════════════════ 5. drag & drop ═════════════════
@@ -338,6 +344,9 @@ class MainWindow(QWidget):
         self._normalize   = bool(state.get("normalize", False))
         if hasattr(self, 'chk_normalize'):
             self.chk_normalize.setChecked(self._normalize)
+        self._compress    = bool(state.get("compress", False))
+        if hasattr(self, 'chk_compress'):
+            self.chk_compress.setChecked(self._compress)
         last    = state.get("last")
         records = state.get("playlists", [])
         for rec in records:
@@ -359,11 +368,13 @@ class MainWindow(QWidget):
             str(self._playlists[self._cur_pl_idx].path) if self._cur_pl_idx is not None else None)
         self._auto_resume = self.chk_resume.isChecked()
         self._normalize   = self.chk_normalize.isChecked()
+        self._compress    = self.chk_compress.isChecked()
         state = {
             "playlists": [{"path": str(pl.path), "name": pl.name} for pl in self._playlists],
             "last": last,
             "auto_resume": self._auto_resume,
             "normalize": self._normalize,
+            "compress": self._compress,
         }
         storage.save(state)
         for pl in self._playlists:
