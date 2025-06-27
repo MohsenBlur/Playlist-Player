@@ -68,19 +68,22 @@ AUDIO_OPTIONS = ["System default", "DirectSound", "WASAPI shared", "WASAPI exclu
 AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
 
 # color themes: name -> palette colors
-THEMES = {
-    "System": None,
-    "Light":  {"window":"#ffffff", "text":"#000000", "button":"#f0f0f0", "base":"#ffffff",
-                "highlight":"#3daee9", "highlight_text":"#ffffff"},
-    "Dark":   {"window":"#2b2b2b", "text":"#dddddd", "button":"#3c3c3c", "base":"#4a4a4a",
-                "highlight":"#3daee9", "highlight_text":"#000000"},
-    "Ocean":  {"window":"#e0f7fa", "text":"#004d40", "button":"#b2ebf2", "base":"#ffffff",
-                "highlight":"#00838f", "highlight_text":"#ffffff"},
-    "Forest": {"window":"#e8f5e9", "text":"#1b5e20", "button":"#c8e6c9", "base":"#ffffff",
-                "highlight":"#43a047", "highlight_text":"#ffffff"},
-    "Plum":   {"window":"#f3e5f5", "text":"#4a148c", "button":"#e1bee7", "base":"#ffffff",
-                "highlight":"#6a1b9a", "highlight_text":"#ffffff"},
+THEMES_LIGHT={
+    "Light": {"window":"#ffffff","text":"#000000","button":"#f0f0f0","base":"#ffffff","highlight":"#3daee9","highlight_text":"#ffffff"},
+    "Ocean Breeze": {"window":"#e0f7fa","text":"#004d40","button":"#b2ebf2","base":"#ffffff","highlight":"#00838f","highlight_text":"#ffffff"},
+    "Forest Morning": {"window":"#e8f5e9","text":"#1b5e20","button":"#c8e6c9","base":"#ffffff","highlight":"#43a047","highlight_text":"#ffffff"},
+    "Rose Petal": {"window":"#fce4ec","text":"#880e4f","button":"#f8bbd0","base":"#ffffff","highlight":"#c2185b","highlight_text":"#ffffff"},
+    "Sunny Day": {"window":"#fffde7","text":"#f57f17","button":"#fff9c4","base":"#ffffff","highlight":"#ffb300","highlight_text":"#000000"}
 }
+THEMES_DARK={
+    "Dark": {"window":"#2b2b2b","text":"#dddddd","button":"#3c3c3c","base":"#4a4a4a","highlight":"#3daee9","highlight_text":"#000000"},
+    "Midnight": {"window":"#121212","text":"#e0e0e0","button":"#1e1e1e","base":"#1e1e1e","highlight":"#bb86fc","highlight_text":"#000000"},
+    "Dracula": {"window":"#282a36","text":"#f8f8f2","button":"#44475a","base":"#44475a","highlight":"#bd93f9","highlight_text":"#000000"},
+    "Monokai": {"window":"#272822","text":"#f8f8f2","button":"#373831","base":"#272822","highlight":"#a6e22e","highlight_text":"#000000"},
+    "Slate": {"window":"#1f1f28","text":"#c5c8c6","button":"#282a36","base":"#282a36","highlight":"#8abeb7","highlight_text":"#000000"}
+}
+THEMES={"System":None,**THEMES_LIGHT,**THEMES_DARK}
+
 ART_DIR = Path.home()/".playlist-relinker-cache"/"art"; ART_DIR.mkdir(parents=True, exist_ok=True)
 TICKS, MAX_SECONDS = 10, 86_400   # slider: 100 ms per tick; clamp 24 h
 
@@ -232,9 +235,10 @@ class MainWindow(QWidget):
         split.setSizes([240,460,300])
 
         self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete=(QPushButton(t) for t in ("Create","Scan","Rename","Delete"))
+        self.btn_theme_group = QToolButton(); self.btn_theme_group.setCheckable(True); self.btn_theme_group.setText("Light")
         self.cmb_theme = QComboBox(); self.cmb_theme.addItems(list(THEMES.keys()))
         self.btn_prev=QPushButton("Prev"); self.btn_next=QPushButton("Next")
-        tb=QHBoxLayout(); [tb.addWidget(b) for b in(self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete)]; tb.addStretch(); tb.addWidget(self.cmb_theme); tb.addWidget(self.btn_prev); tb.addWidget(self.btn_next)
+        tb=QHBoxLayout(); [tb.addWidget(b) for b in(self.btn_create,self.btn_scan,self.btn_rename,self.btn_delete)]; tb.addStretch(); tb.addWidget(self.btn_theme_group); tb.addWidget(self.cmb_theme); tb.addWidget(self.btn_prev); tb.addWidget(self.btn_next)
 
         self.btn_play = QPushButton("Play/Pause")
         self.chk_resume = QCheckBox("Auto-resume")
@@ -278,6 +282,18 @@ class MainWindow(QWidget):
         self._init_style()
         self._refresh_sel(); self._refresh_cur(); self._highlight_row()
 
+    def _update_theme_dropdown(self):
+        dark=self.btn_theme_group.isChecked()
+        self.btn_theme_group.setText("Dark" if dark else "Light")
+        names=list(THEMES_DARK.keys()) if dark else list(THEMES_LIGHT.keys())
+        self.cmb_theme.blockSignals(True)
+        self.cmb_theme.clear(); self.cmb_theme.addItem("System"); self.cmb_theme.addItems(names)
+        if self._theme not in ["System"]+names:
+            self._theme=names[0] if names else "System"
+        idx=self.cmb_theme.findText(self._theme)
+        if idx>=0: self.cmb_theme.setCurrentIndex(idx)
+        self.cmb_theme.blockSignals(False)
+
     # ---------- signals
     def _wire_signals(self):
         self.slider.jumpRequested.connect(self._player.seek)
@@ -299,6 +315,7 @@ class MainWindow(QWidget):
             lambda s: (self._player.set_compress(bool(s)), self._save_state())
         )
         self.cmb_theme.currentTextChanged.connect(lambda n:(self._apply_theme(n), self._save_state()))
+        self.btn_theme_group.toggled.connect(lambda *_: (self._update_theme_dropdown(), self._apply_theme(self._theme), self._save_state()))
 
     # ═════════════════ 5. drag & drop ═════════════════
     def dragEnterEvent(self,e:QDragEnterEvent):
@@ -381,10 +398,13 @@ class MainWindow(QWidget):
     def _load_state(self):
         state   = storage.load()
         self._theme = state.get("theme", "System")
-        if hasattr(self, 'cmb_theme'):
-            idx = self.cmb_theme.findText(self._theme)
-            if idx != -1:
-                self.cmb_theme.setCurrentIndex(idx)
+        if hasattr(self, 'btn_theme_group'):
+            self.btn_theme_group.setChecked(self._theme in THEMES_DARK)
+            if hasattr(self, 'cmb_theme'):
+                self._update_theme_dropdown()
+                idx = self.cmb_theme.findText(self._theme)
+                if idx != -1:
+                    self.cmb_theme.setCurrentIndex(idx)
         self._auto_resume = bool(state.get("auto_resume", False))
         self.chk_resume.setChecked(self._auto_resume)
         self._normalize   = bool(state.get("normalize", False))
