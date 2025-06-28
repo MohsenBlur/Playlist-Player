@@ -69,7 +69,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui    import (
     QColor, QPalette, QPixmap, QIcon, QDragEnterEvent, QDropEvent
 )
-from PySide6.QtCore   import Qt, QTimer, Signal, QAbstractNativeEventFilter
+from PySide6.QtCore   import Qt, QTimer, Signal, QAbstractNativeEventFilter, QMetaObject
 from mutagen          import File as MFile
 from mutagen.id3      import ID3
 from PIL              import Image, ImageFile
@@ -818,7 +818,10 @@ class MainWindow(QWidget):
             return
         self._last_media_evt = now
         print(f"[Playlist-Player] media key from {alias!r}")
-        QTimer.singleShot(0, self._toggle_play)
+        # keyboard callbacks run in a separate thread; invoke on main thread
+        QMetaObject.invokeMethod(
+            self, "_toggle_play", Qt.QueuedConnection
+        )
 
     def _update_time_label(self,pos:float,length:float):
         self.lbl_time.setText(f"{int(pos)//60:02}:{int(pos)%60:02} / {int(length)//60:02}:{int(length)%60:02}")
