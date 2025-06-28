@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui    import (
     QColor, QPalette, QPixmap, QIcon, QDragEnterEvent, QDropEvent
 )
-from PySide6.QtCore   import Qt, QTimer, Signal
+from PySide6.QtCore   import Qt, QTimer, Signal, QAbstractNativeEventFilter
 from mutagen          import File as MFile
 from mutagen.id3      import ID3
 from PIL              import Image, ImageFile
@@ -76,6 +76,13 @@ import scanner, storage, player, history
 ICON_PATH  = APP_DIR / "Playlist-Player_logo.ico"
 AUDIO_OPTIONS = ["System default", "DirectSound", "WASAPI shared", "WASAPI exclusive"]
 AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
+
+# Play/Pause key can appear under several names or as raw scancode 0xB3
+MEDIA_KEY_ALIASES = (
+    "media play pause",      # canonical name in keyboard ≥0.13
+    "play/pause media",      # legacy alias
+    179,                     # raw virtual-key  (VK_MEDIA_PLAY_PAUSE)
+)
 
 # color themes: name -> palette colors
 # ── 10 LIGHT THEMES ──
@@ -363,18 +370,49 @@ class MainWindow(QWidget):
         self._wire_signals()
         self._apply_theme(self._theme)
         QTimer(self,interval=100,timeout=self._tick).start()
-        self._hotkey=None
+        # ── Global Play/Pause hot-key (multi-alias + scan-code) ─────────────
+        self._hotkey = None
         if keyboard:
-            try:
-                self._hotkey=keyboard.add_hotkey(
-                    'play/pause media',
-                    lambda: QTimer.singleShot(0, self._toggle_play))
-            except Exception as e:
-                if os.name == 'nt':
-                    raise RuntimeError(
-                        f"Failed to register media hotkey: {e}") from e
-                self._hotkey=None
+            for alias in MEDIA_KEY_ALIASES:
+                try:
+                    self._hotkey = keyboard.add_hotkey(
+                        alias,
+                        lambda: QTimer.singleShot(0, self._toggle_play),
+                        suppress=False,          # let OS and other apps see it
+                    )
+                    print(f"[Playlist-Player] ▶/⏸ bound on {alias!r}")
+                    break
+                except (ValueError, RuntimeError):
+                    continue
+            if self._hotkey is None and os.name == "nt":
+                raise RuntimeError("Failed to register Play/Pause hot-key")
 
+        # ── Windows fallback: intercept WM_APPCOMMAND directly ──────────────
+        if os.name == "nt":
+            import ctypes, ctypes.wintypes as wt
+
+            WM_APPCOMMAND               = 0x0319
+            APPCOMMAND_MEDIA_PLAY_PAUSE = 14
+
+            class _AppCommandFilter(QAbstractNativeEventFilter):
+                def __init__(self, parent: "MainWindow"):
+                    super().__init__()
+                    self._parent = parent
+
+                def nativeEventFilter(self, etype, message):
+                    if etype != "windows_generic_MSG":
+                        return False, 0
+                    msg = wt.MSG.from_address(int(message))
+                    if msg.message == WM_APPCOMMAND:
+                        cmd = (msg.lParam >> 16) & 0xFFFF
+                        if cmd == APPCOMMAND_MEDIA_PLAY_PAUSE:
+                            QTimer.singleShot(0, self._parent._toggle_play)
+                            return True, 1        # handled
+                    return False, 0
+
+            QApplication.instance().installNativeEventFilter(
+                _AppCommandFilter(self)
+            )
         if self._auto_resume and self._cur_pl_idx is not None:
             pl = self._playlists[self._cur_pl_idx]
             self._player.load_playlist(pl.path, pl.tracks)
