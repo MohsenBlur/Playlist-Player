@@ -422,8 +422,14 @@ class MainWindow(QWidget):
                     if msg.message == WM_APPCOMMAND:
                         cmd = (msg.lParam >> 16) & 0xFFFF
                         if cmd == APPCOMMAND_MEDIA_PLAY_PAUSE:
+                            now = time.monotonic()
+                            # Ignore this message if the keyboard hook fired less than 250 ms ago
+                            if now - getattr(self._parent, "_last_media_evt", 0) < 0.25:
+                                return True, 1            # swallow duplicate, do nothing
+                            self._parent._last_media_evt = now
+                            print("[Playlist-Player] WM_APPCOMMAND media key")
                             QTimer.singleShot(0, self._parent._toggle_play)
-                            return True, 1        # handled
+                            return True, 1                # handled
                     return False, 0
 
             QApplication.instance().installNativeEventFilter(
@@ -789,10 +795,20 @@ class MainWindow(QWidget):
             self._player.load_playlist(pl.path,pl.tracks)
             self.slider.setEnabled(True); self._player.play(); self._on_track_change()
 
+    # ------------------------------------------------------------------
+    # Robust Play-/Pause toggle (VLC is always present)
+    # ------------------------------------------------------------------
     def _toggle_play(self):
-        if self._player.player and self._player.player.is_playing(): self._player.pause()
-        elif not self._player.player: self._play_selected()
-        else: self._player.play()
+        if not self._player.player:          # nothing loaded yet
+            self._play_selected()
+            return
+
+        import vlc
+        st = self._player.player.get_state()
+        if st in (vlc.State.Playing, vlc.State.Buffering, vlc.State.Opening):
+            self._player.pause()
+        else:
+            self._player.play()
 
     # ---------- debounced media-key handler
     def _on_media_key(self, alias: str) -> None:
