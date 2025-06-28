@@ -43,6 +43,19 @@ def _ensure_env() -> None:
     sp = (VENV_DIR/"Lib/site-packages") if os.name=="nt" else \
          next((VENV_DIR/"lib").glob("python*/site-packages"))
     site.addsitedir(sp)
+
+    # ----- NEW: install any package that is still missing -----
+    try:
+        import keyboard                      # already present?
+    except ModuleNotFoundError:
+        subprocess.check_call([
+            str(VENV_DIR / ("Scripts" if os.name == "nt" else "bin") / "pip"),
+            "install", "keyboard", "--quiet"
+        ])
+        site.addsitedir(sp)                  # refresh import path
+        import importlib; importlib.invalidate_caches()
+        importlib.import_module("keyboard")
+
     os.environ["PATH"] = f"{VENV_DIR/('Scripts' if os.name=='nt' else 'bin')}{os.pathsep}{os.environ.get('PATH','')}"
 _ensure_env()
 
