@@ -64,7 +64,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QListWidget, QListWidgetItem, QVBoxLayout,
     QHBoxLayout, QSplitter, QPushButton, QFileDialog, QInputDialog,
     QLabel, QMessageBox, QFrame, QComboBox, QSlider, QDialog,
-    QDialogButtonBox, QCheckBox, QToolButton
+    QDialogButtonBox, QCheckBox, QToolButton, QLabel, QSlider
 )
 from PySide6.QtGui    import (
     QColor, QPalette, QPixmap, QIcon, QDragEnterEvent, QDropEvent
@@ -377,11 +377,14 @@ class MainWindow(QWidget):
         self._normalize=False
         self._compress=False
         self._theme="System"
-
+        # ---- load persisted flags BEFORE creating the VLC pipeline ----
         self._load_state()
+
+        # ---- build player with the loaded options ---------------------
         self._player = player.VLCGaplessPlayer(self._on_track_change)
         self._player.set_normalize(self._normalize)
         self._player.set_compress(self._compress)
+        self._player.set_boost_gain(self._boost_gain)   # NEW
         self._wire_signals()
         self._apply_theme(self._theme)
         QTimer(self,interval=100,timeout=self._tick).start()
@@ -462,6 +465,12 @@ class MainWindow(QWidget):
         sv.addWidget(self.lbl_curtitle); sv.addWidget(self.tracks_cur,1)
         sv.addWidget(QLabel("Audio output")); sv.addWidget(self.cmb_output)
         sv.addWidget(self.chk_normalize); sv.addWidget(self.chk_compress)
+        sv.addWidget(QLabel("Boost (dB)"))
+        self.sld_boost = QSlider(Qt.Horizontal)
+        self.sld_boost.setRange(12, 24)          # 12-24 dB
+        self.sld_boost.setTickInterval(6); self.sld_boost.setValue(12)
+        sv.addWidget(self.sld_boost)
+
         sv.addStretch(); sv.addWidget(self.lbl_cover,0,Qt.AlignCenter)
 
         split = QSplitter(Qt.Horizontal)
@@ -549,6 +558,10 @@ class MainWindow(QWidget):
         self.chk_compress.stateChanged.connect(
             lambda s: (self._player.set_compress(bool(s)), self._save_state())
         )
+        self.sld_boost.valueChanged.connect(
+            lambda v: (self._player.set_boost_gain(v), self._save_state())
+        )
+
         self.cmb_theme.currentTextChanged.connect(lambda n:(self._apply_theme(n), self._save_state()))
         self.btn_theme_group.toggled.connect(lambda *_: (self._update_theme_dropdown(), self._apply_theme(self._theme), self._save_state()))
 
@@ -643,6 +656,8 @@ class MainWindow(QWidget):
         self._auto_resume = bool(state.get("auto_resume", False))
         self.chk_resume.setChecked(self._auto_resume)
         self._normalize   = bool(state.get("normalize", False))
+        self._boost_gain = int(state.get("boost_gain", 12))
+        self.sld_boost.setValue(self._boost_gain)
         if hasattr(self, 'chk_normalize'):
             self.chk_normalize.setChecked(self._normalize)
         self._compress    = bool(state.get("compress", False))
@@ -677,6 +692,7 @@ class MainWindow(QWidget):
             "normalize": self._normalize,
             "compress": self._compress,
             "theme": self._theme,
+            "boost_gain": self.sld_boost.value(),
         }
         storage.save(state)
         for pl in self._playlists:

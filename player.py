@@ -14,6 +14,7 @@ from pathlib import Path
 from typing  import List, Set, Callable, Dict
 
 import vlc
+# Does this libVLC support --compressor-softclip?
 import history
 
 # ───────────────────────────────── Audio-output CLI options
@@ -23,14 +24,42 @@ AOUT_OPTS: dict[str, list[str]] = {
     "wasapi_shared"   : ["--aout=wasapi"],
     "wasapi_exclusive": ["--aout=wasapi", "--wasapi-exclusivemode"],
 }
+# ---------------------------------------------------------------
+# Robustly detect which, if any, soft-clip flag works
+# ---------------------------------------------------------------
+import contextlib, io
+
+def _detect_softclip_flag() -> str | None:
+    """Return the flag that really works, or None if unsupported."""
+    for flag in ("--compressor-soft-clip", "--compressor-softclip"):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            try:
+                inst = vlc.Instance("--intf", "dummy", flag)
+                if not inst:                       # pointer is NULL → unsupported
+                    continue
+                mp = inst.media_player_new()
+                if not mp:                         # still NULL → unsupported
+                    continue
+                mp.release(); inst.release()
+                return flag                        # success
+            except Exception:
+                continue
+    return None
+
+_SOFTCLIP_OPT = _detect_softclip_flag()   # e.g. "--compressor-soft-clip"
 
 class VLCGaplessPlayer:
     WRITE_INTERVAL = 5.0          # seconds between scheduled writes
-
+    def set_boost_gain(self, gain_db: int) -> None:
+        self._boost_gain_db = max(0, min(gain_db, 24))
+        if self._compress:
+            self._restart_instance()
     def __init__(self, on_track_change: Callable[[], None]):
         self._aout_mode  = "default"
         self._normalize  = False
         self._compress   = False
+        self._boost_gain_db = 12     # make-up gain used when compressor active
         self._cb         = on_track_change
         self._instance   = None
         self._make_instance()
@@ -55,15 +84,45 @@ class VLCGaplessPlayer:
     # ─────────────────────────────── instance / output
     def _make_instance(self):
         opts = ["--no-video", "--quiet", *AOUT_OPTS[self._aout_mode]]
+        # ---------- audio filters ---------------------------------------
         filters = []
         if self._normalize:
             filters.append("normvol")
+
         if self._compress:
             filters.append("compressor")
-            opts.append("--compressor-makeup-gain=12")
+            ratio   = 2
+            thresh  = -30
+            gain    = self._boost_gain_db
+            if gain > 12:            # “High boost” preset
+                ratio  = 8
+                thresh = -40
+            opts.extend([
+                f"--compressor-makeup-gain={gain}",
+                f"--compressor-ratio={ratio}",
+                f"--compressor-threshold={thresh}",
+            ])
+            if gain >= 18 and _SOFTCLIP_OPT:
+                opts.append(_SOFTCLIP_OPT)
+            elif gain >= 18 and not _SOFTCLIP_OPT:
+                filters.append("volnorm")        # protect against clipping
+
         if filters:
             opts.append("--audio-filter=" + ",".join(filters))
+
         self._instance = vlc.Instance(opts)
+    # --------------------------------------------------------------
+    # restart player instance and relink current playlist/position
+    # --------------------------------------------------------------
+    def _restart_instance(self):
+        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
+        cur_idx, cur_pos   = self.idx, self.position()
+        self.stop()
+        self._make_instance()
+        if cur_pl:
+            self.load_playlist(cur_pl, cur_tracks)
+            self.idx = min(cur_idx, max(0, len(self.playlist) - 1))
+            self.seek(cur_pos)
 
     def set_output(self, mode: str):
         if mode == self._aout_mode or mode not in AOUT_OPTS:

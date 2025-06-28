@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # storage.py – rev-s6 (2025-07-01)
 
-"""
+r"""
 Resilient persistent-state helper
 ═════════════════════════════════
 * Same config folder for script **and** PyInstaller binary
   – Windows  : %APPDATA%\Playlist-Player\appstate.json
   – macOS/*nix: ~/.config/playlist-player/appstate.json
-* Atomic write **in-place** + `.bak` safety copy
-* Rolls back automatically if the primary JSON is unreadable
+...
 """
 
 from __future__ import annotations
@@ -55,6 +54,7 @@ def _empty_state() -> Dict:
         "auto_resume": False,
         "normalize":   False,
         "compress":    False,
+        "boost_gain":  12,          # dB  (new)
         "theme":       "System",
     }
 
