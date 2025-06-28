@@ -15,7 +15,7 @@ Key features
 """
 
 from __future__ import annotations
-import sys, os, subprocess, venv, site, hashlib, io
+import sys, os, subprocess, venv, site, hashlib, io, time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set
 
@@ -77,12 +77,14 @@ ICON_PATH  = APP_DIR / "Playlist-Player_logo.ico"
 AUDIO_OPTIONS = ["System default", "DirectSound", "WASAPI shared", "WASAPI exclusive"]
 AUDIO_MODES   = ["default", "directsound", "wasapi_shared", "wasapi_exclusive"]
 
-# Play/Pause key can appear under several names or as raw scancode 0xB3
+# Play/Pause key can appear under several names or as raw scancode # First entry must match what keyspy printed: 'play/pause media'
 MEDIA_KEY_ALIASES = (
-    "media play pause",      # canonical name in keyboard ≥0.13
-    "play/pause media",      # legacy alias
-    179,                     # raw virtual-key  (VK_MEDIA_PLAY_PAUSE)
+    "play/pause media",   # ← your exact key name
+    "media play pause",   # other keyboards
+    -179,                 # raw scan-code with extended flag
+    179,                  # raw scan-code without flag
 )
+
 
 # color themes: name -> palette colors
 # ── 10 LIGHT THEMES ──
@@ -370,22 +372,23 @@ class MainWindow(QWidget):
         self._wire_signals()
         self._apply_theme(self._theme)
         QTimer(self,interval=100,timeout=self._tick).start()
-        # ── Global Play/Pause hot-key (multi-alias + scan-code) ─────────────
-        self._hotkey = None
+        # ── Global Play/Pause hot-keys: register *every* alias ──────────────
+        self._hotkey_ids: list[int] = []
         if keyboard:
             for alias in MEDIA_KEY_ALIASES:
                 try:
-                    self._hotkey = keyboard.add_hotkey(
+                    hid = keyboard.add_hotkey(
                         alias,
-                        lambda: QTimer.singleShot(0, self._toggle_play),
-                        suppress=False,          # let OS and other apps see it
+                        lambda a=alias: self._on_media_key(a),  # pass alias
+                        suppress=False,                         # don’t swallow
                     )
+                    self._hotkey_ids.append(hid)
                     print(f"[Playlist-Player] ▶/⏸ bound on {alias!r}")
-                    break
                 except (ValueError, RuntimeError):
-                    continue
-            if self._hotkey is None and os.name == "nt":
-                raise RuntimeError("Failed to register Play/Pause hot-key")
+                    pass
+
+            if not self._hotkey_ids and os.name == "nt":
+                raise RuntimeError("Failed to register *any* Play/Pause hot-key")
 
         # ── Windows fallback: intercept WM_APPCOMMAND directly ──────────────
         if os.name == "nt":
@@ -778,6 +781,16 @@ class MainWindow(QWidget):
         elif not self._player.player: self._play_selected()
         else: self._player.play()
 
+    # ---------- debounced media-key handler
+    def _on_media_key(self, alias: str) -> None:
+        """Prevent double-toggles when two aliases fire for one key-press."""
+        now = time.monotonic()
+        if now - getattr(self, "_last_media_evt", 0) < 0.25:   # 250 ms guard
+            return
+        self._last_media_evt = now
+        print(f"[Playlist-Player] media key from {alias!r}")
+        QTimer.singleShot(0, self._toggle_play)
+
     def _update_time_label(self,pos:float,length:float):
         self.lbl_time.setText(f"{int(pos)//60:02}:{int(pos)%60:02} / {int(length)//60:02}:{int(length)%60:02}")
 
@@ -804,9 +817,12 @@ class MainWindow(QWidget):
 
     # ═════════════════ 14. close ═════════════════
     def closeEvent(self,e):
-        if keyboard and self._hotkey is not None:
-            try: keyboard.remove_hotkey(self._hotkey)
-            except Exception: pass
+        if keyboard:
+            for hid in getattr(self, "_hotkey_ids", []):
+                try:
+                    keyboard.remove_hotkey(hid)
+                except Exception:
+                    pass
         self._player.close(); self._save_state(); super().closeEvent(e)
 
 # ═════════════════ 15. entry-point ═════════════════
