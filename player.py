@@ -29,22 +29,20 @@ AOUT_OPTS: dict[str, list[str]] = {
 # ---------------------------------------------------------------
 import contextlib, io
 
+import subprocess, shutil
+
 def _detect_softclip_flag() -> str | None:
-    """Return the flag that really works, or None if unsupported."""
+    """Return working soft-clip flag (sub-process test) or None."""
+    vlc_exe = shutil.which("vlc") or shutil.which("vlc.exe")
+    if not vlc_exe:
+        return None
     for flag in ("--compressor-soft-clip", "--compressor-softclip"):
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            try:
-                inst = vlc.Instance("--intf", "dummy", flag)
-                if not inst:                       # pointer is NULL → unsupported
-                    continue
-                mp = inst.media_player_new()
-                if not mp:                         # still NULL → unsupported
-                    continue
-                mp.release(); inst.release()
-                return flag                        # success
-            except Exception:
-                continue
+        rc = subprocess.run(
+            [vlc_exe, "--intf", "dummy", flag, "--play-and-exit", "--run-time=0"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ).returncode
+        if rc == 0:
+            return flag
     return None
 
 _SOFTCLIP_OPT = _detect_softclip_flag()   # e.g. "--compressor-soft-clip"
@@ -52,9 +50,18 @@ _SOFTCLIP_OPT = _detect_softclip_flag()   # e.g. "--compressor-soft-clip"
 class VLCGaplessPlayer:
     WRITE_INTERVAL = 5.0          # seconds between scheduled writes
     def set_boost_gain(self, gain_db: int) -> None:
-        self._boost_gain_db = max(0, min(gain_db, 24))
-        if self._compress:
+        new_gain = max(0, min(gain_db, 24))
+        if new_gain == self._boost_gain_db:
+            return
+        old_gain = self._boost_gain_db
+        self._boost_gain_db = new_gain
+        if not self._compress:      # compressor not active → nothing else
+            return
+        try:
             self._restart_instance()
+        except Exception as e:
+            print("boost-gain restart failed:", e)
+            self._boost_gain_db = old_gain      # roll back on failure
     def __init__(self, on_track_change: Callable[[], None]):
         self._aout_mode  = "default"
         self._normalize  = False
@@ -88,6 +95,8 @@ class VLCGaplessPlayer:
         filters = []
         if self._normalize:
             filters.append("normvol")
+            if self._boost_gain_db >= 18 and _SOFTCLIP_OPT is None:
+                filters.append("volnorm")        # limiter if soft-clip absent
 
         if self._compress:
             filters.append("compressor")
@@ -114,31 +123,6 @@ class VLCGaplessPlayer:
     # --------------------------------------------------------------
     # restart player instance and relink current playlist/position
     # --------------------------------------------------------------
-    def _restart_instance(self):
-        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
-        cur_idx, cur_pos   = self.idx, self.position()
-        self.stop()
-        self._make_instance()
-        if cur_pl:
-            self.load_playlist(cur_pl, cur_tracks)
-            self.idx = min(cur_idx, max(0, len(self.playlist) - 1))
-            self.seek(cur_pos)
-
-    def set_output(self, mode: str):
-        if mode == self._aout_mode or mode not in AOUT_OPTS:
-            return
-        prev = self._aout_mode
-        self._aout_mode = mode
-        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
-        cur_idx, cur_pos   = self.idx, self.position()
-        self.stop(); self._make_instance()
-        if cur_pl:
-            self.load_playlist(cur_pl, cur_tracks)
-            self.idx = min(cur_idx, max(0, len(self.playlist)-1))
-            self.seek(cur_pos)
-        else:
-            self._aout_mode = prev
-
     def set_normalize(self, enable: bool):
         if enable == self._normalize:
             return
@@ -146,14 +130,16 @@ class VLCGaplessPlayer:
         self._normalize = enable
         cur_pl, cur_tracks = self._pl_path, list(self.playlist)
         cur_idx, cur_pos   = self.idx, self.position()
-        self.stop(); self._make_instance()
+        try:
+            self.stop(); self._make_instance()
+        except Exception as e:
+            print("normalize restart failed:", e)
+            self._normalize = prev
+            return
         if cur_pl:
             self.load_playlist(cur_pl, cur_tracks)
             self.idx = min(cur_idx, max(0, len(self.playlist)-1))
             self.seek(cur_pos)
-        else:
-            self._normalize = prev
-
     def set_compress(self, enable: bool):
         if enable == self._compress:
             return
@@ -161,13 +147,16 @@ class VLCGaplessPlayer:
         self._compress = enable
         cur_pl, cur_tracks = self._pl_path, list(self.playlist)
         cur_idx, cur_pos   = self.idx, self.position()
-        self.stop(); self._make_instance()
+        try:
+            self.stop(); self._make_instance()
+        except Exception as e:
+            print("compressor restart failed:", e)
+            self._compress = prev
+            return
         if cur_pl:
             self.load_playlist(cur_pl, cur_tracks)
             self.idx = min(cur_idx, max(0, len(self.playlist)-1))
             self.seek(cur_pos)
-        else:
-            self._compress = prev
 
     # ─────────────────────────────── playlist handling
     def load_playlist(self, pl_path: Path, tracks: List[Path]):
@@ -286,7 +275,7 @@ class VLCGaplessPlayer:
     def close(self):
         self._closed = True
         self.flush_history()
-        self._writer_th.join()
+        self._writer_th.join(0.6)     # wait ≤ 600 ms
 
     # ─────────────────────────────── GUI tick (every 0.1 s)
     def tick(self):

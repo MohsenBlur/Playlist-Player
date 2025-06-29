@@ -61,6 +61,11 @@ REM ─────────────────────────�
     --add-data "Playlist-Player_logo.ico;." ^
     --hidden-import mutagen ^
     --hidden-import PIL.Image ^
+    --hidden-import scanner ^
+    --hidden-import history ^
+    --hidden-import player ^
+    --hidden-import storage ^
+    --paths "%CD%" ^
     main.py
 if errorlevel 1 goto :error
 

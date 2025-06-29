@@ -40,22 +40,30 @@ def _ensure_env() -> None:
                 "Failed to install dependencies. "
                 "Run 'pip install -r requirements.txt' manually."
             ) from e
-    sp = (VENV_DIR/"Lib/site-packages") if os.name=="nt" else \
-         next((VENV_DIR/"lib").glob("python*/site-packages"))
-    site.addsitedir(sp)
+    # -------- add site-packages, handle exotic layouts ----------
+    if os.name == "nt":
+        sp = VENV_DIR / "Lib" / "site-packages"
+    else:
+        sp = next((VENV_DIR/"lib").glob("python*/site-packages"), None)
+        if sp is None:
+            sp = VENV_DIR / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    site.addsitedir(str(sp))
 
-    # ----- NEW: install any package that is still missing -----
-    try:
-        import keyboard                      # already present?
-    except ModuleNotFoundError:
-        subprocess.check_call([
-            str(VENV_DIR / ("Scripts" if os.name == "nt" else "bin") / "pip"),
-            "install", "keyboard", "--quiet"
-        ])
-        site.addsitedir(sp)                  # refresh import path
-        import importlib; importlib.invalidate_caches()
-        importlib.import_module("keyboard")
+    # -------- install whatever is still missing -----------------
+    missing = []
+    for pkg, mod in [("mutagen", "mutagen"),
+                     ("pillow",  "PIL.Image"),
+                     ("python-vlc", "vlc"),
+                     ("keyboard", "keyboard")]:
+        try:
+            __import__(mod)
+        except ModuleNotFoundError:
+            missing.append(pkg)
 
+    if missing:
+        pip = VENV_DIR / ("Scripts" if os.name=="nt" else "bin") / "pip"
+        subprocess.check_call([str(pip), "install", *missing, "--quiet"])
+        site.addsitedir(str(sp))
     os.environ["PATH"] = f"{VENV_DIR/('Scripts' if os.name=='nt' else 'bin')}{os.pathsep}{os.environ.get('PATH','')}"
 _ensure_env()
 
@@ -366,27 +374,29 @@ class MainWindow(QWidget):
         self.setWindowTitle("Playlist-Player")
         if ICON_PATH.exists(): self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.resize(1100,650); self.setAcceptDrops(True)
-        self._init_style(); self._build_widgets()
+        # --- read saved theme early so window paints with correct palette
+        _st        = storage.load()
+        self._theme = _st.get("theme", "System")
+        self._apply_theme(self._theme)
+
+        self._init_style()
+        self._build_widgets()
 
         # runtime state
         self._playlists:List[scanner.Playlist]=[]
         self._cur_pl_idx:Optional[int]=None
         self._meta_cache:Dict[Path,Tuple[str,str,Optional[Path]]]={}
         self._icon_cache:Dict[Path,QPixmap]={}
+        self._pending_meta:set[Path]=set()          # paths scheduled for lazy load
         self._auto_resume=False
         self._normalize=False
         self._compress=False
         self._theme="System"
-        # ---- load persisted flags BEFORE creating the VLC pipeline ----
-        self._load_state()
-
-        # ---- build player with the loaded options ---------------------
+        # ---- build player, defer heavy work until window is visible ---
         self._player = player.VLCGaplessPlayer(self._on_track_change)
-        self._player.set_normalize(self._normalize)
-        self._player.set_compress(self._compress)
-        self._player.set_boost_gain(self._boost_gain)   # NEW
-        self._wire_signals()
-        self._apply_theme(self._theme)
+
+        self._wire_signals()                      # widgets respond now
+        QTimer.singleShot(50, self._finish_startup)  # heavy work later
         QTimer(self,interval=100,timeout=self._tick).start()
         # ── Global Play/Pause hot-keys: register *every* alias ──────────────
         self._hotkey_ids: list[int] = []
@@ -438,6 +448,22 @@ class MainWindow(QWidget):
             QApplication.instance().installNativeEventFilter(
                 _AppCommandFilter(self)
             )
+    # ---------- runs on the first event-loop tick, after win.show() -----
+    def _finish_startup(self):
+        self._load_state()                         # scan playlists, read JSON
+
+        # apply flags loaded from disk
+        self._player.set_normalize(self._normalize)
+        self._player.set_compress(self._compress)
+        self._player.set_boost_gain(self._boost_gain)
+
+        # if no playlist was stored, default to the first one
+        if self._cur_pl_idx is None and self._playlists:
+            self._cur_pl_idx = 0
+
+        self._highlight_row()
+
+        # --- auto-resume playback --------------------------------------
         if self._auto_resume and self._cur_pl_idx is not None:
             pl = self._playlists[self._cur_pl_idx]
             self._player.load_playlist(pl.path, pl.tracks)
@@ -524,7 +550,10 @@ class MainWindow(QWidget):
             pal.setColor(QPalette.HighlightedText, QColor(hl_text))
         app.setPalette(pal)
         self._init_style()
-        self._refresh_sel(); self._refresh_cur(); self._highlight_row()
+        if hasattr(self, "tracks_sel"):          # lists exist only after _build_widgets()
+            self._refresh_sel()
+            self._refresh_cur()
+            self._highlight_row()
 
     def _update_theme_dropdown(self):
         dark=self.btn_theme_group.isChecked()
@@ -625,9 +654,19 @@ class MainWindow(QWidget):
         except Exception: pass
         self._meta_cache[p]=(title,artist,art); return self._meta_cache[p]
 
-    def _display(self,p:Path):
-        t,a,_ = self._meta(p)
-        return f"{a} – {t}" if t and a else (t or a or p.name)
+    # ---------- fast placeholder; real tags load lazily ----------
+    def _display(self, p: Path) -> str:
+        if p in self._meta_cache:
+            t, a, _ = self._meta_cache[p]
+            disp = f"{a} – {t}" if t and a else (t or a)
+            return disp or p.name
+
+        # schedule metadata fetch once
+        if p not in self._pending_meta:
+            self._pending_meta.add(p)
+            QTimer.singleShot(0, lambda path=p: self._fetch_meta(Path(path)))
+
+        return p.name
 
     def _icon48(self,p:Path):
         if p in self._icon_cache: return QIcon(self._icon_cache[p])
@@ -636,6 +675,30 @@ class MainWindow(QWidget):
             pix=strip_dpr(QPixmap(str(art))).scaled(48,48,Qt.KeepAspectRatio,Qt.SmoothTransformation)
             self._icon_cache[p]=pix; return QIcon(pix)
         return None
+
+    def _fetch_meta(self, p: Path) -> None:
+        """Background-load tags for one track and refresh visible rows."""
+        self._pending_meta.discard(p)
+
+        title = artist = ""
+        try:
+            audio = MFile(p)
+            if audio and audio.tags:
+                title  = (audio.tags.get("TIT2") or audio.tags.get("TITLE")  or [""])[0]
+                artist = (audio.tags.get("TPE1") or audio.tags.get("ARTIST") or [""])[0]
+        except Exception:
+            pass
+
+        # store minimal entry; art is extracted on demand
+        self._meta_cache[p] = (title, artist, None)
+        new_txt = f"{artist} – {title}" if artist and title else (title or artist or p.name)
+
+        # update text in both list widgets
+        for lw in (self.tracks_sel, self.tracks_cur):
+            for i in range(lw.count()):
+                it = lw.item(i)
+                if it and Path(it.data(Qt.UserRole) or "") == p:
+                    it.setText(new_txt)
 
     def _cover(self,p:Path):
         _,_,art=self._meta(p)
@@ -646,6 +709,7 @@ class MainWindow(QWidget):
     def _load_state(self):
         state   = storage.load()
         self._theme = state.get("theme", "System")
+        self._apply_theme(self._theme)                   # paint palette now
         if hasattr(self, 'btn_theme_group'):
             self.btn_theme_group.setChecked(self._theme in THEMES_DARK)
             if hasattr(self, 'cmb_theme'):
@@ -748,9 +812,11 @@ class MainWindow(QWidget):
         if self._add_playlists([pl]): history.ensure_name(pl.path,pl.name); self._save_state()
 
     # ═════════════════ 9. list helpers ═════════════════
-    def _make_item(self,p:Path,prefix:str=""):
-        it=QListWidgetItem(prefix+self._display(p))
-        if (ico:=self._icon48(p)): it.setIcon(ico)
+    def _make_item(self, p: Path, prefix: str = ""):
+        it = QListWidgetItem(prefix + self._display(p))
+        it.setData(Qt.UserRole, str(p))                 # store path for updates
+        if (ico := self._icon48(p)):
+            it.setIcon(ico)
         return it
 
     def _place_bar(self,bar:QFrame,lw:QListWidget,idx:int,frac:float):
@@ -798,11 +864,22 @@ class MainWindow(QWidget):
         length=max(1,self._player.length()); frac=self._player.position()/length
         self._place_bar(self._bar_play,self.tracks_cur,self._player.idx,frac)
 
-    def _highlight_row(self):
+    def _highlight_row(self) -> None:
+        # select the stored row, or clear if index is invalid
+        if self._cur_pl_idx is not None and 0 <= self._cur_pl_idx < self.list_playlists.count():
+            self.list_playlists.setCurrentRow(self._cur_pl_idx)
+        else:
+            self.list_playlists.clearSelection()
+
+        # paint bold + bar background
         for r in range(self.list_playlists.count()):
-            it=self.list_playlists.item(r); bold=r==self._cur_pl_idx
+            it  = self.list_playlists.item(r)
+            bold = r == self._cur_pl_idx
             it.setBackground(QColor(self._row_bg) if bold else Qt.transparent)
-            f=it.font(); f.setBold(bold); it.setFont(f)
+            f = it.font(); f.setBold(bold); it.setFont(f)
+
+        # keep the middle pane in sync with the highlighted playlist
+        self._refresh_sel()
 
     # ═════════════════ 11. playback helper ═════════════════
     def _play_selected(self):

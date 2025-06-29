@@ -101,9 +101,13 @@ def _normalise(line: str) -> Path | None:
     return Path(line)
 
 # ───── playlist readers ───────────────────────────────────────────
-def _read_m3u(p: Path) -> List[Path]:
-    text = p.read_text(encoding="utf-8", errors="replace")
-    return [q for ln in text.splitlines() if (q := _normalise(ln))]
+def _read_m3u(p: Path) -> list[str]:
+    tracks: list[str] = []
+    with p.open("r", encoding="utf-8", errors="replace") as f:
+        for ln in f:
+            if q := _normalise(ln):
+                tracks.append(q)
+    return tracks
 
 def _read_fplite(p: Path) -> List[Path]:
     data = p.read_bytes()

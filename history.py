@@ -30,9 +30,8 @@ def load(pl: Path) -> Dict[str, Any]:
         return {}
 
 def _atomic_write(path: Path, data: dict):
-    tmp = Path(tempfile.gettempdir()) / (path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
-                   encoding="utf-8")
+    tmp = path.with_suffix(".tmp")          # same directory → same volume
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 def save(pl: Path,
