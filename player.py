@@ -123,6 +123,17 @@ class VLCGaplessPlayer:
     # --------------------------------------------------------------
     # restart player instance and relink current playlist/position
     # --------------------------------------------------------------
+    def _restart_instance(self) -> None:
+        """Recreate VLC instance and resume current playlist/position."""
+        cur_pl, cur_tracks = self._pl_path, list(self.playlist)
+        cur_idx, cur_pos   = self.idx, self.position()
+        self.stop()
+        self._make_instance()
+        if cur_pl:
+            self.load_playlist(cur_pl, cur_tracks)
+            self.idx = min(cur_idx, max(0, len(self.playlist)-1))
+            self.seek(cur_pos)
+
     def set_normalize(self, enable: bool):
         if enable == self._normalize:
             return
@@ -157,6 +168,20 @@ class VLCGaplessPlayer:
             self.load_playlist(cur_pl, cur_tracks)
             self.idx = min(cur_idx, max(0, len(self.playlist)-1))
             self.seek(cur_pos)
+
+    def set_output(self, mode: str) -> None:
+        """Change audio output mode and restart VLC instance if needed."""
+        if mode not in AOUT_OPTS:
+            raise ValueError(f"invalid output mode: {mode}")
+        if mode == self._aout_mode:
+            return
+        prev = self._aout_mode
+        self._aout_mode = mode
+        try:
+            self._restart_instance()
+        except Exception as e:
+            print("output restart failed:", e)
+            self._aout_mode = prev
 
     # ─────────────────────────────── playlist handling
     def load_playlist(self, pl_path: Path, tracks: List[Path]):
