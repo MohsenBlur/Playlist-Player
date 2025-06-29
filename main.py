@@ -72,7 +72,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QListWidget, QListWidgetItem, QVBoxLayout,
     QHBoxLayout, QSplitter, QPushButton, QFileDialog, QInputDialog,
     QLabel, QMessageBox, QFrame, QComboBox, QSlider, QDialog,
-    QDialogButtonBox, QCheckBox, QToolButton, QLabel, QSlider
+    QDialogButtonBox, QCheckBox, QToolButton
 )
 from PySide6.QtGui    import (
     QColor, QPalette, QPixmap, QIcon, QDragEnterEvent, QDropEvent
