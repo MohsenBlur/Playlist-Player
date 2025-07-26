@@ -37,7 +37,10 @@ BAK_FILE   = CFG_DIR / "appstate.bak"
 def _atomic_write(path: Path, data: Any) -> None:
     """Write *data* as UTF-8 JSON atomically and keep a .bak copy."""
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     # create/refresh backup *before* replacement
     if path.exists():
         shutil.copy2(path, BAK_FILE)
