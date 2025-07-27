@@ -3,7 +3,7 @@
 """
 Gap-less VLC wrapper with debounced—but *guaranteed*—history writes.
 
-• Flush every 5 s during playback (rate-limited)
+• Flush every WRITE_INTERVAL seconds during playback (configurable)
 • Immediate flush on track change, pause/seek, or app exit
 • Atomic JSON writes via history.save()
 """
@@ -48,7 +48,7 @@ def _detect_softclip_flag() -> str | None:
 _SOFTCLIP_OPT = _detect_softclip_flag()   # e.g. "--compressor-soft-clip"
 
 class VLCGaplessPlayer:
-    WRITE_INTERVAL = 5.0          # seconds between scheduled writes
+    WRITE_INTERVAL = 5.0          # default seconds between scheduled writes
     def set_boost_gain(self, gain_db: int) -> None:
         new_gain = max(0, min(gain_db, 24))
         if new_gain == self._boost_gain_db:
@@ -62,7 +62,10 @@ class VLCGaplessPlayer:
         except Exception as e:
             print("boost-gain restart failed:", e)
             self._boost_gain_db = old_gain      # roll back on failure
-    def __init__(self, on_track_change: Callable[[], None]):
+    def __init__(self, on_track_change: Callable[[], None], *,
+                 write_interval: float = WRITE_INTERVAL):
+        """Create player with optional history write interval."""
+        self.WRITE_INTERVAL = float(write_interval)
         self._aout_mode  = "default"
         self._normalize  = False
         self._compress   = False
@@ -87,6 +90,7 @@ class VLCGaplessPlayer:
         self._writer_th     = threading.Thread(target=self._writer_loop,
                                                daemon=True)
         self._writer_th.start()
+        self._last_tick_pos = 0.0  # track position for change detection
 
     # ─────────────────────────────── instance / output
     def _make_instance(self):
@@ -244,7 +248,9 @@ class VLCGaplessPlayer:
     def position(self) -> float: return (self.player.get_time()   or 0)/1000 if self.player else 0.0
     def seek(self, s: float):
         if self.player:
-            self.player.set_time(int(s*1000)); self._mark_dirty(force=True)
+            self.player.set_time(int(s*1000))
+            self._mark_dirty(force=True)
+            self.flush_history()   # persist on large position jump
 
     def _mark_finished(self):
         if self._pl_path and self.playlist:
@@ -308,4 +314,10 @@ class VLCGaplessPlayer:
             self._next_pending = False
             self.next_track()
         if self.player and self._pl_path:
-            self._mark_dirty()   # update _pending (may flush later)
+            cur = self.position()
+            if abs(cur - self._last_tick_pos) > 2.0:
+                self._mark_dirty(force=True)
+                self.flush_history()
+            else:
+                self._mark_dirty()   # update _pending (may flush later)
+            self._last_tick_pos = cur
