@@ -642,17 +642,29 @@ class MainWindow(QWidget):
         if not art.exists(): art.write_bytes(data)
         return art
 
-    def _meta(self,p:Path):
-        if p in self._meta_cache: return self._meta_cache[p]
-        title=artist=""; art=None
+    def _meta(self, p: Path):
+        if p in self._meta_cache:
+            title, artist, art = self._meta_cache[p]
+            if art is None:
+                try:
+                    audio = MFile(p)
+                    art = self._extract_art(audio, p)
+                except Exception:
+                    art = None
+                self._meta_cache[p] = (title, artist, art)
+            return self._meta_cache[p]
+
+        title = artist = ""; art = None
         try:
-            audio=MFile(p)
-            if getattr(audio,"tags",None):
-                title =(audio.tags.get("TIT2") or audio.tags.get("TITLE")  or [""])[0]
-                artist=(audio.tags.get("TPE1") or audio.tags.get("ARTIST") or [""])[0]
-            art=self._extract_art(audio,p)
-        except Exception: pass
-        self._meta_cache[p]=(title,artist,art); return self._meta_cache[p]
+            audio = MFile(p)
+            if getattr(audio, "tags", None):
+                title  = (audio.tags.get("TIT2") or audio.tags.get("TITLE")  or [""])[0]
+                artist = (audio.tags.get("TPE1") or audio.tags.get("ARTIST") or [""])[0]
+            art = self._extract_art(audio, p)
+        except Exception:
+            pass
+        self._meta_cache[p] = (title, artist, art)
+        return self._meta_cache[p]
 
     # ---------- fast placeholder; real tags load lazily ----------
     def _display(self, p: Path) -> str:
